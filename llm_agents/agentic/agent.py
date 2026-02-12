@@ -10,7 +10,12 @@ import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from llm_agents.agentic.llm_model import LLMModel, ModelResponse, OpenAIModel, AnthropicModel
+from llm_agents.agentic.llm_model import (
+    LLMModel,
+    ModelResponse,
+    OpenAIModel,
+    AnthropicModel,
+)
 from llm_agents.agentic.tool import Tool
 from llm_agents.environment.session import Session
 from llm_agents.environment.step import Step
@@ -77,12 +82,29 @@ class Agent(ABC):
         """Run the agent's loop on a user query. Returns the final answer."""
         pass
 
+    @abstractmethod
+    async def run_async(self, user_query: str, session: Session) -> str:
+        """Async version of run()."""
+        pass
+
     def act(self, messages: list[dict], session: Session) -> ModelResponse:
         """Call the LLM with the message history and return the response."""
         # Set session ID for logging before the call
         if self.model._session_id != session.id:
             self.model._session_id = session.id
-        return self.model.call(messages, self.tools if self.tools else None)
+        call_number = session.increment_call_counter()
+        return self.model.call(
+            messages, self.tools if self.tools else None, call_number
+        )
+
+    async def act_async(self, messages: list[dict], session: Session) -> ModelResponse:
+        """Async version of act()."""
+        if self.model._session_id != session.id:
+            self.model._session_id = session.id
+        call_number = session.increment_call_counter()
+        return await self.model.call_async(
+            messages, self.tools if self.tools else None, call_number
+        )
 
     def execute_tool(self, name: str, arguments_json: str) -> str:
         """Execute a tool by name with JSON arguments.
@@ -119,9 +141,11 @@ class DefaultAgent(Agent):
         config,
         verbose: bool = True,
     ):
-        self.system_prompt_name = config.system_prompt_name
-        self.system_prompt = load_prompt(config.system_prompt_name)
-        self.model = build_model(config.model_name, getattr(config, 'log_llm_calls', False))
+        self.system_prompt_name = config.get_system_prompt_name()
+        self.system_prompt = load_prompt(self.system_prompt_name)
+        self.model = build_model(
+            config.model_name, getattr(config, "log_llm_calls", False)
+        )
         self.tools = []
         self._tool_map = {}
         self.max_steps = 1  # Single call, no loop
@@ -133,6 +157,23 @@ class DefaultAgent(Agent):
 
         messages = session.build_messages(self.system_prompt)
         response = self.act(messages, session)
+
+        answer = response.content or ""
+        session.add_step(Step(role="assistant", content=answer))
+        session.metadata["steps"] = 1
+        session.metadata["status"] = "success"
+
+        if self.verbose:
+            print(f"[Answer] {answer[:500]}{'...' if len(answer) > 500 else ''}")
+
+        return answer
+
+    async def run_async(self, user_query: str, session: Session) -> str:
+        """Async version of run()."""
+        session.add_step(Step(role="user", content=user_query))
+
+        messages = session.build_messages(self.system_prompt)
+        response = await self.act_async(messages, session)
 
         answer = response.content or ""
         session.add_step(Step(role="assistant", content=answer))
@@ -161,9 +202,11 @@ class ReActAgent(Agent):
         config,
         verbose: bool = True,
     ):
-        self.system_prompt_name = config.system_prompt_name
-        self.system_prompt = load_prompt(config.system_prompt_name)
-        self.model = build_model(config.model_name, getattr(config, 'log_llm_calls', False))
+        self.system_prompt_name = config.get_system_prompt_name()
+        self.system_prompt = load_prompt(self.system_prompt_name)
+        self.model = build_model(
+            config.model_name, getattr(config, "log_llm_calls", False)
+        )
         self.tools = config.tools or []
         self._tool_map = {t.name: t for t in self.tools}
         self.max_steps = config.max_steps
@@ -185,24 +228,30 @@ class ReActAgent(Agent):
                     "name": tc.name,
                     "arguments": tc.arguments,
                 }
-                session.add_step(Step(
-                    role="assistant",
-                    content=response.content,
-                    tool_call=tool_call_record,
-                ))
+                session.add_step(
+                    Step(
+                        role="assistant",
+                        content=response.content,
+                        tool_call=tool_call_record,
+                    )
+                )
 
                 # Execute the tool
                 observation = self.execute_tool(tc.name, tc.arguments)
-                session.add_step(Step(
-                    role="tool",
-                    tool_call=tool_call_record,
-                    tool_result=observation,
-                ))
+                session.add_step(
+                    Step(
+                        role="tool",
+                        tool_call=tool_call_record,
+                        tool_result=observation,
+                    )
+                )
 
                 if self.verbose:
                     print(f"[Step {step_idx + 1}] Tool: {tc.name}")
                     print(f"  Args: {tc.arguments}")
-                    print(f"  Obs:  {observation[:200]}{'...' if len(observation) > 200 else ''}")
+                    print(
+                        f"  Obs:  {observation[:200]}{'...' if len(observation) > 200 else ''}"
+                    )
                 continue
 
             # --- final answer ---
@@ -219,7 +268,74 @@ class ReActAgent(Agent):
         # max steps exceeded
         session.metadata["steps"] = self.max_steps
         session.metadata["status"] = "max_steps_exceeded"
-        last = session.trajectory[-1].content or session.trajectory[-1].tool_result or ""
+        last = (
+            session.trajectory[-1].content or session.trajectory[-1].tool_result or ""
+        )
+
+        if self.verbose:
+            print(f"[Max steps reached] Last output: {last[:200]}")
+
+        return last
+
+    async def run_async(self, user_query: str, session: Session) -> str:
+        """Async version of run()."""
+        session.add_step(Step(role="user", content=user_query))
+
+        for step_idx in range(self.max_steps):
+            messages = session.build_messages(self.system_prompt)
+            response = await self.act_async(messages, session)
+
+            # --- tool call ---
+            if response.tool_calls:
+                tc = response.tool_calls[0]
+                tool_call_record = {
+                    "id": tc.id,
+                    "name": tc.name,
+                    "arguments": tc.arguments,
+                }
+                session.add_step(
+                    Step(
+                        role="assistant",
+                        content=response.content,
+                        tool_call=tool_call_record,
+                    )
+                )
+
+                # Execute the tool
+                observation = self.execute_tool(tc.name, tc.arguments)
+                session.add_step(
+                    Step(
+                        role="tool",
+                        tool_call=tool_call_record,
+                        tool_result=observation,
+                    )
+                )
+
+                if self.verbose:
+                    print(f"[Step {step_idx + 1}] Tool: {tc.name}")
+                    print(f"  Args: {tc.arguments}")
+                    print(
+                        f"  Obs:  {observation[:200]}{'...' if len(observation) > 200 else ''}"
+                    )
+                continue
+
+            # --- final answer ---
+            answer = response.content or ""
+            session.add_step(Step(role="assistant", content=answer))
+            session.metadata["steps"] = step_idx + 1
+            session.metadata["status"] = "success"
+
+            if self.verbose:
+                print(f"[Answer] {answer[:500]}{'...' if len(answer) > 500 else ''}")
+
+            return answer
+
+        # max steps exceeded
+        session.metadata["steps"] = self.max_steps
+        session.metadata["status"] = "max_steps_exceeded"
+        last = (
+            session.trajectory[-1].content or session.trajectory[-1].tool_result or ""
+        )
 
         if self.verbose:
             print(f"[Max steps reached] Last output: {last[:200]}")

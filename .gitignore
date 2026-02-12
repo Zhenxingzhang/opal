@@ -163,3 +163,5 @@ cython_debug/
 
 # experiment results folder
 results
+
+.eval_cache

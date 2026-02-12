@@ -1,4 +1,6 @@
-"""Quick demo script for the agent environment."""
+"""Async demo script for the agent environment."""
+
+import asyncio
 
 from llm_agents.runner import Runner, AgentConfig
 from llm_agents.agentic.builtin_tools import (
@@ -8,7 +10,7 @@ from llm_agents.agentic.builtin_tools import (
 )
 
 
-def main():
+async def main():
     config = AgentConfig(
         model_name="gpt-4o-2024-11-20",
         agent_name="react",
@@ -17,7 +19,7 @@ def main():
         tools=[CALCULATOR_TOOL, SEARCH_WEB_TOOL, READ_PDF_TOOL],
     )
     runner = Runner(config=config)
-    answer = runner.run(
+    answer = await runner.run_async(
         "read the /Users/zzhang/Downloads/2601.18226.pdf file and tell me in one sentence what its about"
     )
 
@@ -26,4 +28,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

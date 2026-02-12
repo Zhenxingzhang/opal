@@ -28,15 +28,21 @@ AGENT_REGISTRY = {
 @dataclass
 class AgentConfig:
     """Configuration for Runner and Agent."""
+
     model_name: str = "gpt-4o-2024-11-20"
     agent_name: str = "react"  # "react" or "default" - determines agent type and prompt
     max_steps: int = 10
     log_llm_calls: bool = False
     tools: list[Tool] = field(default_factory=list)
+    system_prompt_name: str | None = None  # Optional custom prompt name
 
-    @property
-    def system_prompt_name(self) -> str:
-        """Get the prompt name for this agent."""
+    def get_system_prompt_name(self) -> str:
+        """Get the prompt name for this agent.
+
+        If system_prompt_name is set, use it. Otherwise, use the default for the agent type.
+        """
+        if self.system_prompt_name:
+            return self.system_prompt_name
         if self.agent_name in AGENT_REGISTRY:
             return AGENT_REGISTRY[self.agent_name][1]
         return "default_prompt"
@@ -98,6 +104,21 @@ class Runner:
 
         return self.agent.run(user_query, self.session)
 
+    async def run_async(self, user_query: str) -> str:
+        """
+        Async version of run(). Returns the final text answer.
+        The full trajectory is stored in self.session.trajectory.
+        """
+        self.session.reset()
+        self.session.metadata = {
+            "timestamp": datetime.now().isoformat(),
+            "query": user_query,
+            "agent": self.agent.system_prompt_name,
+            "model": self.agent.model.get_name(),
+        }
+
+        return await self.agent.run_async(user_query, self.session)
+
     def print_trajectory(self):
         """Pretty-print the trajectory for debugging."""
         print("=" * 60)
@@ -108,7 +129,9 @@ class Runner:
             if step.content:
                 print(f"Content: {step.content[:300]}")
             if step.tool_call:
-                print(f"Tool:    {step.tool_call['name']}({step.tool_call['arguments']})")
+                print(
+                    f"Tool:    {step.tool_call['name']}({step.tool_call['arguments']})"
+                )
             if step.tool_result:
                 print(f"Result:  {step.tool_result[:300]}")
         print("\n" + "=" * 60)

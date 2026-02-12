@@ -48,9 +48,9 @@ def _search_web(query: str, num_results: int = 5) -> str:
         Search results as formatted text.
     """
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS
     except ImportError:
-        return "Error: duckduckgo_search package required. Install with: pip install duckduckgo-search"
+        return "Error: ddgs package required. Install with: pip install ddgs"
 
     try:
         with DDGS() as ddgs:

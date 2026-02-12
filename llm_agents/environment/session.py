@@ -14,16 +14,23 @@ class Session:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     trajectory: list[Step] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    call_counter: int = 0
 
     def add_step(self, step: Step):
         """Add a step to the trajectory."""
         self.trajectory.append(step)
+
+    def increment_call_counter(self) -> int:
+        """Increment and return the call counter."""
+        self.call_counter += 1
+        return self.call_counter
 
     def reset(self):
         """Clear trajectory and metadata for a fresh run, generate new id."""
         self.id = str(uuid.uuid4())
         self.trajectory = []
         self.metadata = {}
+        self.call_counter = 0
 
     def build_messages(self, system_prompt: str | None = None) -> list[dict]:
         """Build message list for LLM API from optional system prompt + trajectory."""

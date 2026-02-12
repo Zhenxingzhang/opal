@@ -10,6 +10,7 @@ Usage:
     response = model.call(messages, tools)
 """
 
+import asyncio
 import os
 import time
 import json
@@ -35,6 +36,7 @@ RESULTS_DIR = Path(__file__).parent.parent.parent / "results"
 @dataclass
 class ToolCallInfo:
     """Information about a tool call made by the model."""
+
     id: str
     name: str
     arguments: str  # JSON string of arguments
@@ -43,6 +45,7 @@ class ToolCallInfo:
 @dataclass
 class ModelResponse:
     """Response from an LLM model."""
+
     content: str | None
     tool_calls: list[ToolCallInfo] | None
     raw_response: Any = None  # Original response object for debugging
@@ -52,7 +55,6 @@ class LLMModel(ABC):
     """Base class for language models."""
 
     log_llm_calls: bool = False
-    _call_counter: int = 0
     _log_timestamp: str | None = None
     _session_id: str | None = None
 
@@ -61,12 +63,33 @@ class LLMModel(ABC):
         self,
         messages: list[dict],
         tools: list[Tool] | None = None,
+        call_number: int | None = None,
     ) -> ModelResponse:
         """Call the model with messages and optional tools.
 
         Args:
             messages: List of message dicts with 'role' and 'content' keys.
             tools: Optional list of Tool objects available for the model.
+            call_number: Optional call number for logging.
+
+        Returns:
+            ModelResponse with content and/or tool_calls.
+        """
+        pass
+
+    @abstractmethod
+    async def call_async(
+        self,
+        messages: list[dict],
+        tools: list[Tool] | None = None,
+        call_number: int | None = None,
+    ) -> ModelResponse:
+        """Async version of call().
+
+        Args:
+            messages: List of message dicts with 'role' and 'content' keys.
+            tools: Optional list of Tool objects available for the model.
+            call_number: Optional call number for logging.
 
         Returns:
             ModelResponse with content and/or tool_calls.
@@ -90,12 +113,15 @@ class LLMModel(ABC):
         if enabled and self._log_timestamp is None:
             self._log_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    def _log_llm_call(self, kwargs: dict, response: ModelResponse):
+    def _log_llm_call(
+        self, kwargs: dict, response: ModelResponse, call_number: int | None = None
+    ):
         """Log raw LLM call kwargs and response to file."""
         if not self.log_llm_calls:
             return
 
-        self._call_counter += 1
+        # Use provided call number or default to 0
+        call_num = call_number if call_number is not None else 0
 
         # Ensure timestamp is set
         if self._log_timestamp is None:
@@ -111,7 +137,7 @@ class LLMModel(ABC):
 
         log_entry = {
             "timestamp": datetime.now().isoformat(),
-            "call_number": self._call_counter,
+            "call_number": call_num,
             "session_id": self._session_id,
             "model_name": self.get_name(),
             "llm_raw_input": serializable_kwargs,
@@ -120,17 +146,21 @@ class LLMModel(ABC):
                 "tool_calls": [
                     {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
                     for tc in response.tool_calls
-                ] if response.tool_calls else None,
+                ]
+                if response.tool_calls
+                else None,
             },
         }
 
         # Create output directory: results/llm_calls/{timestamp}_{session_id_prefix}/
         session_suffix = self._session_id[:8] if self._session_id else "unknown"
-        output_dir = RESULTS_DIR / "llm_calls" / f"{self._log_timestamp}_{session_suffix}"
+        output_dir = (
+            RESULTS_DIR / "llm_calls" / f"{self._log_timestamp}/{session_suffix}"
+        )
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Write to file
-        output_file = output_dir / f"llm_call_{self._call_counter}.json"
+        output_file = output_dir / f"llm_call_{call_num}.json"
         with open(output_file, "w") as f:
             json.dump(log_entry, f, indent=2)
 
@@ -149,11 +179,12 @@ class OpenAIModel(LLMModel):
         base_url: str | None = None,
     ):
         self.model_name = model_name
-        self.api_key = api_key or os.getenv("CHATGPT_API_KEY") or os.getenv("OPENAI_API_KEY")
+        self.api_key = (
+            api_key or os.getenv("CHATGPT_API_KEY") or os.getenv("OPENAI_API_KEY")
+        )
         self.temperature = temperature
         self.max_retries = max_retries
         self.log_llm_calls = False
-        self._call_counter = 0
         self._log_timestamp = None
         self._session_id = None
 
@@ -161,6 +192,7 @@ class OpenAIModel(LLMModel):
         if base_url:
             client_kwargs["base_url"] = base_url
         self._client = openai.OpenAI(**client_kwargs)
+        self._async_client = openai.AsyncOpenAI(**client_kwargs)
 
     def get_name(self) -> str:
         return self.model_name
@@ -169,6 +201,7 @@ class OpenAIModel(LLMModel):
         self,
         messages: list[dict],
         tools: list[Tool] | None = None,
+        call_number: int | None = None,
     ) -> ModelResponse:
         """Call the OpenAI API."""
         kwargs = {
@@ -184,12 +217,41 @@ class OpenAIModel(LLMModel):
             try:
                 response = self._client.chat.completions.create(**kwargs)
                 parsed_response = self._parse_response(response)
-                self._log_llm_call(kwargs, parsed_response)
+                self._log_llm_call(kwargs, parsed_response, call_number)
                 return parsed_response
             except Exception as e:
                 logger.error(f"LLM call failed (attempt {attempt + 1}): {e}")
                 if attempt < self.max_retries - 1:
-                    time.sleep(2 ** attempt)
+                    time.sleep(2**attempt)
+                else:
+                    raise
+
+    async def call_async(
+        self,
+        messages: list[dict],
+        tools: list[Tool] | None = None,
+        call_number: int | None = None,
+    ) -> ModelResponse:
+        """Async call to the OpenAI API."""
+        kwargs = {
+            "model": self.model_name,
+            "messages": messages,
+            "temperature": self.temperature,
+        }
+        if tools:
+            kwargs["tools"] = [t.schema() for t in tools]
+            kwargs["tool_choice"] = "auto"
+
+        for attempt in range(self.max_retries):
+            try:
+                response = await self._async_client.chat.completions.create(**kwargs)
+                parsed_response = self._parse_response(response)
+                self._log_llm_call(kwargs, parsed_response, call_number)
+                return parsed_response
+            except Exception as e:
+                logger.error(f"LLM call failed (attempt {attempt + 1}): {e}")
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(2**attempt)
                 else:
                     raise
 
@@ -233,26 +295,24 @@ class AnthropicModel(LLMModel):
         self.max_retries = max_retries
         self.max_tokens = max_tokens
         self.log_llm_calls = False
-        self._call_counter = 0
         self._log_timestamp = None
         self._session_id = None
 
         try:
             import anthropic
+
             self._client = anthropic.Anthropic(api_key=self.api_key)
+            self._async_client = anthropic.AsyncAnthropic(api_key=self.api_key)
         except ImportError:
             raise ImportError("anthropic package required: pip install anthropic")
 
     def get_name(self) -> str:
         return self.model_name
 
-    def call(
-        self,
-        messages: list[dict],
-        tools: list[Tool] | None = None,
-    ) -> ModelResponse:
-        """Call the Anthropic API."""
-        # Extract system message if present
+    def _prepare_kwargs(
+        self, messages: list[dict], tools: list[Tool] | None
+    ) -> tuple[dict, str | None]:
+        """Prepare kwargs for Anthropic API call."""
         system_content = None
         filtered_messages = []
         for msg in messages:
@@ -273,16 +333,49 @@ class AnthropicModel(LLMModel):
         if tools:
             kwargs["tools"] = [self._convert_tool(t) for t in tools]
 
+        return kwargs
+
+    def call(
+        self,
+        messages: list[dict],
+        tools: list[Tool] | None = None,
+        call_number: int | None = None,
+    ) -> ModelResponse:
+        """Call the Anthropic API."""
+        kwargs = self._prepare_kwargs(messages, tools)
+
         for attempt in range(self.max_retries):
             try:
                 response = self._client.messages.create(**kwargs)
                 parsed_response = self._parse_response(response)
-                self._log_llm_call(kwargs, parsed_response)
+                self._log_llm_call(kwargs, parsed_response, call_number)
                 return parsed_response
             except Exception as e:
                 logger.error(f"Anthropic call failed (attempt {attempt + 1}): {e}")
                 if attempt < self.max_retries - 1:
-                    time.sleep(2 ** attempt)
+                    time.sleep(2**attempt)
+                else:
+                    raise
+
+    async def call_async(
+        self,
+        messages: list[dict],
+        tools: list[Tool] | None = None,
+        call_number: int | None = None,
+    ) -> ModelResponse:
+        """Async call to the Anthropic API."""
+        kwargs = self._prepare_kwargs(messages, tools)
+
+        for attempt in range(self.max_retries):
+            try:
+                response = await self._async_client.messages.create(**kwargs)
+                parsed_response = self._parse_response(response)
+                self._log_llm_call(kwargs, parsed_response, call_number)
+                return parsed_response
+            except Exception as e:
+                logger.error(f"Anthropic call failed (attempt {attempt + 1}): {e}")
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(2**attempt)
                 else:
                     raise
 
@@ -316,6 +409,7 @@ class AnthropicModel(LLMModel):
             tool_calls=tool_calls if tool_calls else None,
             raw_response=response,
         )
+
 
 if __name__ == "__main__":
     model = OpenAIModel()
