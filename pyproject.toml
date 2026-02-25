@@ -12,6 +12,7 @@ dependencies = [
     "ddgs>=6.0.0",
     "tqdm>=4.66.0",
     "pandas>=2.0.0",
+    "pandas-stubs~=3.0.0",
 ]
 
 [project.optional-dependencies]
