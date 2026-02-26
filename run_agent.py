@@ -1,7 +1,7 @@
 """Quick demo script for the agent environment."""
 
 from llm_agents.runner import Runner, AgentConfig
-from llm_agents.agentic.builtin_tools import (
+from llm_agents.environment.tool_environment import (
     CALCULATOR_TOOL,
     SEARCH_WEB_TOOL,
     READ_PDF_TOOL,

@@ -7,7 +7,8 @@ from pathlib import Path
 import pandas as pd
 
 from llm_agents import AgentConfig, Runner
-from llm_agents.agentic import SEARCH_WEB_TOOL
+from llm_agents.environment.tool_environment import SEARCH_WEB_TOOL, SEARCH_PDF_TOOL
+from llm_agents.environment.tool_environment import ToolEnvironment
 from utils import build_retriever, PATH_ROOT, PATH_FINANCE_BENCH
 
 ##############################################################################
@@ -16,7 +17,9 @@ from utils import build_retriever, PATH_ROOT, PATH_FINANCE_BENCH
 PATH_RESULTS = PATH_ROOT + "/results/"
 
 PATH_DATASET_JSONL = PATH_FINANCE_BENCH + "/data/financebench_open_source.jsonl"
-PATH_DOCUMENT_INFO_JSONL = PATH_FINANCE_BENCH + "/data/financebench_document_information.jsonl"
+PATH_DOCUMENT_INFO_JSONL = (
+    PATH_FINANCE_BENCH + "/data/financebench_document_information.jsonl"
+)
 
 # Choose DATASET PORTION:
 # - ALL: Full Dataset
@@ -44,7 +47,8 @@ async def process_question(
     async with semaphore:
         doc_name = row["doc_name"]
         retriever = build_retriever(doc_name)
-        runner = Runner(config=config, retriever=retriever, run_timestamp=run_timestamp)
+        env = ToolEnvironment(retriever=retriever)
+        runner = Runner(config=config, env=env, run_timestamp=run_timestamp)
         question = row["question"]
         print(f"Processing: {row['financebench_id']} - {question[:50]}...")
 
@@ -82,15 +86,17 @@ async def write_results(output_file: Path, results_queue: asyncio.Queue, total: 
             print(f"Progress: {written}/{total}")
 
 
-async def main(max_concurrent: int = MAX_CONCURRENT_TASKS, max_tasks: int | None = None):
+async def main(
+    max_concurrent: int = MAX_CONCURRENT_TASKS, max_tasks: int | None = None
+):
     ##############################################################################
     # LOAD DATASET
     ##############################################################################
 
     # Load Full Dataset
     df_questions = pd.read_json(PATH_DATASET_JSONL, lines=True)
-    df_meta = pd.read_json(PATH_DOCUMENT_INFO_JSONL, lines=True)
-    df_full = pd.merge(df_questions, df_meta, on="doc_name")
+    # df_meta = pd.read_json(PATH_DOCUMENT_INFO_JSONL, lines=True)
+    # df_full = pd.merge(df_questions, df_meta, on="doc_name")
 
     # Get all docs
     df_questions = df_questions.sort_values("doc_name")
@@ -116,11 +122,11 @@ async def main(max_concurrent: int = MAX_CONCURRENT_TASKS, max_tasks: int | None
 
     config = AgentConfig(
         model_name=MODEL_NAME,
-        agent_name="react",
-        system_prompt_name="finance/react_prompt_default",
+        agent_name="advanced_react",
+        # system_prompt_name="finance/react_prompt_default",
         max_steps=10,
         log_llm_calls=True,
-        tools=[SEARCH_WEB_TOOL],
+        tools=[SEARCH_PDF_TOOL],
     )
 
     # Shared timestamp for this run

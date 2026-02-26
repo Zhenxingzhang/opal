@@ -92,7 +92,7 @@ class Tool:
 
 **Built-in Tools:**
 - `CALCULATOR_TOOL` - Math expression evaluation
-- `LOOKUP_TOOL` - Stub for retrieval/knowledge base
+- `SEARCH_PDF_TOOL` - Semantic search over PDF content
 - `READ_PDF_TOOL` - PDF text extraction (PyMuPDF)
 - `SEARCH_WEB_TOOL` - Web search (DuckDuckGo)
 
@@ -226,7 +226,7 @@ Return result as observation
 
 ```python
 from llm_agents import Runner, AgentConfig
-from llm_agents.agentic.builtin_tools import CALCULATOR_TOOL, SEARCH_WEB_TOOL
+from llm_agents.environment.builtin_tools import CALCULATOR_TOOL, SEARCH_WEB_TOOL
 
 # Configure agent
 config = AgentConfig(
@@ -242,9 +242,9 @@ runner = Runner(config=config, verbose=True)
 answer = runner.run("What is the square root of 144?")
 
 # Inspect results
-print(runner.trajectory)       # All steps
-print(runner.metadata)         # Execution metadata
-runner.print_trajectory()      # Pretty print
+print(runner.trajectory)  # All steps
+print(runner.metadata)  # Execution metadata
+runner.print_trajectory()  # Pretty print
 ```
 
 ## File Structure

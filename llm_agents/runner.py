@@ -14,9 +14,16 @@ from datetime import datetime
 from typing import Any
 
 from llm_agents.environment.step import Step
-from llm_agents.agentic.tool import Tool
+from llm_agents.environment.tool_environment import ToolEnvironment
+from llm_agents.environment.tool import Tool
 from llm_agents.environment.session import Session
-from llm_agents.agentic.agent import Agent, ReActAgent, DefaultAgent, RAGAgent
+from llm_agents.agentic.agent import (
+    Agent,
+    ReActAgent,
+    DefaultAgent,
+    AdvancedReActAgent,
+    RAGAgent,
+)
 from llm_agents.agentic.llm_model import RESULTS_DIR
 
 logger = logging.getLogger(__name__)
@@ -26,6 +33,7 @@ logger = logging.getLogger(__name__)
 AGENT_REGISTRY = {
     "default": (DefaultAgent, "default_prompt"),
     "react": (ReActAgent, "react_prompt"),
+    "advanced_react": (AdvancedReActAgent, "advanced_react_prompt"),
     "rag": (RAGAgent, "rag_prompt"),
 }
 
@@ -66,10 +74,12 @@ class Runner:
         config: AgentConfig | None = None,
         verbose: bool = False,
         run_timestamp: str | None = None,
+        env: ToolEnvironment | None = None,
         **agent_kwargs,
     ):
         self.config = config or AgentConfig()
         self.run_timestamp = run_timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.env = env
         self.agent = self._build_agent(verbose, **agent_kwargs)
         self.session = Session()
         self.verbose = verbose
@@ -78,16 +88,27 @@ class Runner:
         """Build the appropriate agent based on config."""
         agent_name = self.config.agent_name
 
-        assert agent_name in AGENT_REGISTRY, f"Error: agent type {agent_name} is not supported!"
-
+        assert agent_name in AGENT_REGISTRY, (
+            f"Error: agent type {agent_name} is not supported!"
+        )
 
         agent_class, _ = AGENT_REGISTRY[agent_name]
 
-        return agent_class(
+        agent = agent_class(
             config=self.config,
             verbose=verbose,
             **agent_kwargs,
         )
+
+        # Build ToolEnvironment: merge caller-supplied env with the tool map
+        # derived from the agent's declared tools.
+        tool_map = {t.name: t for t in agent.tools}
+        if self.env is not None:
+            self.env.tool_map = tool_map
+            agent.env = self.env
+        else:
+            agent.env = ToolEnvironment(tool_map=tool_map)
+        return agent
 
     def reset(self):
         """Clear session for a fresh run."""
@@ -107,7 +128,9 @@ class Runner:
         }
 
         if self.config.log_llm_calls:
-            self.agent.model.set_logging(True, session_id=self.session.id, timestamp=self.run_timestamp)
+            self.agent.model.set_logging(
+                True, session_id=self.session.id, timestamp=self.run_timestamp
+            )
 
         result = self.agent.run(user_query, self.session)
         self._log_trajectory()
@@ -127,7 +150,9 @@ class Runner:
         }
 
         if self.config.log_llm_calls:
-            self.agent.model.set_logging(True, session_id=self.session.id, timestamp=self.run_timestamp)
+            self.agent.model.set_logging(
+                True, session_id=self.session.id, timestamp=self.run_timestamp
+            )
 
         result = await self.agent.run_async(user_query, self.session)
         self._log_trajectory()

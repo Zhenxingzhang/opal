@@ -24,7 +24,7 @@ from typing import Any
 from dotenv import load_dotenv
 import openai
 
-from llm_agents.agentic.tool import Tool
+from llm_agents.environment.tool import Tool
 
 load_dotenv()
 
