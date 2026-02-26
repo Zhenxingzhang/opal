@@ -101,17 +101,18 @@ class LLMModel(ABC):
         """Get the model name/identifier."""
         pass
 
-    def set_logging(self, enabled: bool, session_id: str | None = None):
+    def set_logging(self, enabled: bool, session_id: str | None = None, timestamp: str | None = None):
         """Enable or disable LLM call logging.
 
         Args:
             enabled: Whether to log LLM calls.
             session_id: Session ID for organizing logs.
+            timestamp: Run-level timestamp for the log folder. If not provided, one is generated.
         """
         self.log_llm_calls = enabled
         self._session_id = session_id
-        if enabled and self._log_timestamp is None:
-            self._log_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if enabled:
+            self._log_timestamp = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
 
     def _log_llm_call(
         self, kwargs: dict, response: ModelResponse, call_number: int | None = None

@@ -8,30 +8,21 @@ import pandas as pd
 
 from llm_agents import AgentConfig, Runner
 from llm_agents.agentic import SEARCH_WEB_TOOL
+from utils import build_retriever, PATH_ROOT, PATH_FINANCE_BENCH
 
 ##############################################################################
 # DATASET CONFIG
 ##############################################################################
-PATH_CURRENT = os.path.abspath(os.getcwd())
-PATH_DATASET_JSONL = PATH_CURRENT + "/data/financebench_open_source.jsonl"
-PATH_DOCUMENT_INFO_JSONL = (
-    PATH_CURRENT + "/data/financebench_document_information.jsonl"
-)
-PATH_RESULTS = PATH_CURRENT + "/results/"
-PATH_PDFS = PATH_CURRENT + "/pdfs/"
+PATH_RESULTS = PATH_ROOT + "/results/"
+
+PATH_DATASET_JSONL = PATH_FINANCE_BENCH + "/data/financebench_open_source.jsonl"
+PATH_DOCUMENT_INFO_JSONL = PATH_FINANCE_BENCH + "/data/financebench_document_information.jsonl"
 
 # Choose DATASET PORTION:
 # - ALL: Full Dataset
 # - OPEN_SOURCE: Open Source Part (n=150)
 # - CLOSED_SOURCE: Closed Source Part --> Request access at contact@patronus.ai
 DATASET_PORTION = "OPEN_SOURCE"
-
-##############################################################################
-# VECTOR STORE SETUP
-##############################################################################
-VS_CHUNK_SIZE = 1024
-VS_CHUNK_OVERLAP = 30
-VS_DIR_VS = PATH_CURRENT + "/vectorstores"
 
 # Model config
 MODEL_NAME = "gpt-4o-2024-11-20"
@@ -47,10 +38,13 @@ async def process_question(
     config: AgentConfig,
     row: pd.Series,
     results_queue: asyncio.Queue,
+    run_timestamp: str,
 ):
     """Process a single question with concurrency control."""
     async with semaphore:
-        runner = Runner(config=config)
+        doc_name = row["doc_name"]
+        retriever = build_retriever(doc_name)
+        runner = Runner(config=config, retriever=retriever, run_timestamp=run_timestamp)
         question = row["question"]
         print(f"Processing: {row['financebench_id']} - {question[:50]}...")
 
@@ -122,17 +116,20 @@ async def main(max_concurrent: int = MAX_CONCURRENT_TASKS, max_tasks: int | None
 
     config = AgentConfig(
         model_name=MODEL_NAME,
-        agent_name="react",
-        system_prompt_name="finance/react_prompt_default",
+        agent_name="rag",
+        # system_prompt_name="finance/react_prompt_default",
         max_steps=10,
         log_llm_calls=True,
         tools=[SEARCH_WEB_TOOL],
     )
 
+    # Shared timestamp for this run
+    run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
     # Output file path
     output_file = Path(
         PATH_RESULTS,
-        f"{config.agent_name}_{config.get_system_prompt_name()}_{MODEL_NAME}_{EVAL_MODE}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl",
+        f"{config.agent_name}_{config.get_system_prompt_name()}_{MODEL_NAME}_{EVAL_MODE}_{run_timestamp}.jsonl",
     )
 
     # Ensure results directory exists
@@ -146,7 +143,7 @@ async def main(max_concurrent: int = MAX_CONCURRENT_TASKS, max_tasks: int | None
 
     # Create tasks for all questions
     tasks = [
-        process_question(semaphore, config, row, results_queue)
+        process_question(semaphore, config, row, results_queue, run_timestamp)
         for _, row in df_questions.iterrows()
     ]
 
@@ -180,7 +177,7 @@ if __name__ == "__main__":
         "-n",
         type=int,
         default=1,
-        help="Max total tasks to run (default: all)",
+        help="Max total tasks to run (default: 1)",
     )
     args = parser.parse_args()
 

@@ -13,6 +13,10 @@ dependencies = [
     "tqdm>=4.66.0",
     "pandas>=2.0.0",
     "pandas-stubs~=3.0.0",
+    "requests>=2.31.0",
+    "huggingface-hub>=0.20.0",
+    "sentence-transformers>=3.0.0",
+    "tenacity>=8.2.0",
 ]
 
 [project.optional-dependencies]

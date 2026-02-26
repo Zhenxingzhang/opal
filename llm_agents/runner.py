@@ -8,6 +8,7 @@ The Runner:
 """
 
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -15,13 +16,17 @@ from typing import Any
 from llm_agents.environment.step import Step
 from llm_agents.agentic.tool import Tool
 from llm_agents.environment.session import Session
-from llm_agents.agentic.agent import Agent, ReActAgent, DefaultAgent
+from llm_agents.agentic.agent import Agent, ReActAgent, DefaultAgent, RAGAgent
+from llm_agents.agentic.llm_model import RESULTS_DIR
+
+logger = logging.getLogger(__name__)
 
 
 # Maps agent_name to (AgentClass, prompt_file_name)
 AGENT_REGISTRY = {
     "default": (DefaultAgent, "default_prompt"),
     "react": (ReActAgent, "react_prompt"),
+    "rag": (RAGAgent, "rag_prompt"),
 }
 
 
@@ -60,30 +65,29 @@ class Runner:
         self,
         config: AgentConfig | None = None,
         verbose: bool = False,
+        run_timestamp: str | None = None,
+        **agent_kwargs,
     ):
         self.config = config or AgentConfig()
-        self.agent = self._build_agent(verbose)
+        self.run_timestamp = run_timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.agent = self._build_agent(verbose, **agent_kwargs)
         self.session = Session()
         self.verbose = verbose
 
-    def _build_agent(self, verbose: bool) -> Agent:
+    def _build_agent(self, verbose: bool, **agent_kwargs) -> Agent:
         """Build the appropriate agent based on config."""
         agent_name = self.config.agent_name
-        if agent_name not in AGENT_REGISTRY:
-            agent_name = "react"
+
+        assert agent_name in AGENT_REGISTRY, f"Error: agent type {agent_name} is not supported!"
+
 
         agent_class, _ = AGENT_REGISTRY[agent_name]
 
-        if agent_class == DefaultAgent:
-            return DefaultAgent(
-                config=self.config,
-                verbose=verbose,
-            )
-        else:
-            return ReActAgent(
-                config=self.config,
-                verbose=verbose,
-            )
+        return agent_class(
+            config=self.config,
+            verbose=verbose,
+            **agent_kwargs,
+        )
 
     def reset(self):
         """Clear session for a fresh run."""
@@ -102,7 +106,12 @@ class Runner:
             "model": self.agent.model.get_name(),
         }
 
-        return self.agent.run(user_query, self.session)
+        if self.config.log_llm_calls:
+            self.agent.model.set_logging(True, session_id=self.session.id, timestamp=self.run_timestamp)
+
+        result = self.agent.run(user_query, self.session)
+        self._log_trajectory()
+        return result
 
     async def run_async(self, user_query: str) -> str:
         """
@@ -117,7 +126,35 @@ class Runner:
             "model": self.agent.model.get_name(),
         }
 
-        return await self.agent.run_async(user_query, self.session)
+        if self.config.log_llm_calls:
+            self.agent.model.set_logging(True, session_id=self.session.id, timestamp=self.run_timestamp)
+
+        result = await self.agent.run_async(user_query, self.session)
+        self._log_trajectory()
+        return result
+
+    def _log_trajectory(self):
+        """Save the full trajectory to a JSON file in the same folder as LLM call logs."""
+        if not self.config.log_llm_calls:
+            return
+
+        session_suffix = self.session.id[:8] if self.session.id else "unknown"
+        output_dir = (
+            RESULTS_DIR / "llm_calls" / f"{self.run_timestamp}/{session_suffix}"
+        )
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        trajectory_data = {
+            "session_id": self.session.id,
+            "metadata": self.session.metadata,
+            "trajectory": self.session.get_trajectory_as_dicts(),
+        }
+
+        output_file = output_dir / f"{session_suffix}_trajectory.json"
+        with open(output_file, "w") as f:
+            json.dump(trajectory_data, f, indent=2)
+
+        logger.info(f"Trajectory logged to {output_file}")
 
     def print_trajectory(self):
         """Pretty-print the trajectory for debugging."""
