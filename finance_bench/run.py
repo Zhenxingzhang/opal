@@ -116,8 +116,8 @@ async def main(max_concurrent: int = MAX_CONCURRENT_TASKS, max_tasks: int | None
 
     config = AgentConfig(
         model_name=MODEL_NAME,
-        agent_name="rag",
-        # system_prompt_name="finance/react_prompt_default",
+        agent_name="react",
+        system_prompt_name="finance/react_prompt_default",
         max_steps=10,
         log_llm_calls=True,
         tools=[SEARCH_WEB_TOOL],
