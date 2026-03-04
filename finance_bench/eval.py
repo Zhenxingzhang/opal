@@ -97,24 +97,41 @@ async def get_completion_async(prompt, model=None, semaphore=None):
         return None
 
 
+VALID_VERDICTS = {"correct", "incorrect", "no_answer"}
+
+
 def _parse_judge_response(response: str | None) -> dict:
-    """Parse a structured JSON judge response, falling back to plain True/False parsing."""
+    """Parse a structured JSON judge response with 3-way verdict."""
     if response is None:
-        return {"verdict": False, "reasoning": "No response from judge model."}
+        return {"verdict": "no_answer", "reasoning": "No response from judge model."}
 
     # Try parsing as JSON first
     try:
         parsed = json.loads(response.strip())
         if isinstance(parsed, dict) and "verdict" in parsed:
+            verdict = parsed["verdict"]
+            # Handle legacy boolean verdicts from cache
+            if isinstance(verdict, bool):
+                verdict = "correct" if verdict else "incorrect"
+            if verdict not in VALID_VERDICTS:
+                verdict = "incorrect"
             return {
-                "verdict": bool(parsed["verdict"]),
+                "verdict": verdict,
                 "reasoning": parsed.get("reasoning", ""),
             }
     except (json.JSONDecodeError, ValueError):
         pass
 
-    # Fallback: check for true/false in plain text (backwards compat with cached results)
-    verdict = "true" in response.lower()
+    # Fallback: check for verdict strings or legacy true/false in plain text
+    lower = response.lower()
+    if "no_answer" in lower:
+        verdict = "no_answer"
+    elif "correct" in lower and "incorrect" not in lower:
+        verdict = "correct"
+    elif "true" in lower:
+        verdict = "correct"
+    else:
+        verdict = "incorrect"
     return {"verdict": verdict, "reasoning": response.strip()}
 
 
@@ -123,21 +140,25 @@ async def check_answer_equivalence(
 ):
     query_prompt = f"- Query: {query}" if query else ""
 
-    prompt = f"""You are an expert evaluator for AI-generated responses to queries. Your task is to determine whether the AI-generated answer correctly answers the query based on the golden answer provided by a human expert.
+    prompt = f"""You are an expert evaluator for AI-generated responses to queries. Your task is to classify the AI-generated answer into one of three categories based on the golden answer provided by a human expert.
 
-Numerical Accuracy:
-- Rounding differences should be **ignored** if they do not meaningfully change the conclusion.
-- You can allow some flexibility in accuracy. For example, 1.2 is considered similar to 1.23. Two numbers are considered similar if one can be rounded to the other.
-- Fractions, percentage, and numerics could be considered similar, for example: "11 of 14" is considered equivalent to "79%" and "0.79".
+Categories:
+- "correct": The AI-generated answer correctly answers the query (matches the golden answer).
+- "incorrect": The AI attempted to answer but the response is wrong or inaccurate.
+- "no_answer": The AI failed to produce an answer — it refused, said it couldn't answer, gave up, or produced no meaningful response.
+
+Numerical Accuracy (STRICT):
+- Numeric values must match EXACTLY between the AI-generated answer and the golden answer. Any difference in numbers, percentages, fractions, or figures means the answer is "incorrect".
+- No rounding tolerance is allowed. For example, if the golden answer is 1.23, the AI answer of 1.2 is "incorrect".
+- Equivalent representations of the same exact value are acceptable: "50%" and "0.50" and "1/2" all represent the same value and are considered matching.
+- If the golden answer contains a specific number and the AI-generated answer contains a different number, the verdict is "incorrect" — even if the difference is small.
 
 Evaluation Criteria:
-- If the golden answer or any of its equivalence can be inferred or generated from the AI-generated answer, then the AI-generated answer is considered correct.
-- If any number, percentage, fraction, or figure in the golden answer is not present in the AI-generated answer, but can be inferred or generated from the AI-generated answer or implicitly exist in the AI-generated answer, then the AI-generated answer is considered correct.
-- The AI-generated answer is considered correct if it conveys the same or similar meaning, conclusion, or rationale as the golden answer.
-- If the AI-generated answer is a superset of the golden answer, it is also considered correct.
-- If the AI-generated answer provides a valid answer or reasonable interpretation compared to the golden answer, it is considered correct.
-- If the AI-generated answer contains subjective judgments or opinions, it is considered correct as long as they are reasonable and justifiable compared to the golden answer.
-- Otherwise, the AI-generated answer is incorrect.
+- For answers involving numeric values: the numbers must match exactly (see Numerical Accuracy above). Any numeric discrepancy makes the answer "incorrect".
+- For non-numeric answers: the AI-generated answer is "correct" if it conveys the same meaning, conclusion, or rationale as the golden answer.
+- If the AI-generated answer is a superset of the golden answer (contains the correct answer plus additional information), it is "correct".
+- If the AI-generated answer is empty, states it cannot answer, or does not attempt the question, it is "no_answer".
+- Otherwise, the AI-generated answer is "incorrect".
 
 Inputs:
 {query_prompt}
@@ -145,9 +166,9 @@ Inputs:
 - Golden Answer: {gold_answer}
 
 Your output should be ONLY a JSON object with the following format, nothing else:
-{{"verdict": true, "reasoning": "brief explanation"}}
+{{"verdict": "correct", "reasoning": "brief explanation"}}
 
-Set "verdict" to true if the AI-generated answer is correct, false otherwise. Provide a brief reasoning for your judgment."""
+Set "verdict" to one of: "correct", "incorrect", or "no_answer". Provide a brief reasoning for your judgment."""
 
     response = await get_completion_async(prompt, model=model, semaphore=semaphore)
 
@@ -188,8 +209,10 @@ def judge_benchmark_results_from_file(
             gold_answer_col=gold_answer_col, model_answer_col=model_answer_col,
         )
     )
-    wrong_indexes = [i for i, result in enumerate(results) if not result["verdict"]]
-    print(f"Wrong indexes: {wrong_indexes}")
+    incorrect_indexes = [i for i, result in enumerate(results) if result["verdict"] == "incorrect"]
+    no_answer_indexes = [i for i, result in enumerate(results) if result["verdict"] == "no_answer"]
+    print(f"Incorrect indexes: {incorrect_indexes}")
+    print(f"No-answer indexes: {no_answer_indexes}")
     return results, benchmark_results
 
 
@@ -218,35 +241,46 @@ def judge_benchmark_results_from_file_hybrid(
     combined_results = []
     for i in range(len(hybrid_results[models[0]])):
         # OR logic: correct if any judge says correct
-        any_correct = any(hybrid_results[model][i]["verdict"] for model in models)
+        any_correct = any(hybrid_results[model][i]["verdict"] == "correct" for model in models)
+        any_no_answer = all(hybrid_results[model][i]["verdict"] == "no_answer" for model in models)
         # Collect reasoning from all models
         reasoning_parts = []
         for model in models:
             r = hybrid_results[model][i]
             reasoning_parts.append(f"{model}: {r['reasoning']}")
+        if any_correct:
+            verdict = "correct"
+        elif any_no_answer:
+            verdict = "no_answer"
+        else:
+            verdict = "incorrect"
         combined_results.append({
-            "verdict": any_correct,
+            "verdict": verdict,
             "reasoning": " | ".join(reasoning_parts),
         })
 
     return combined_results, all_benchmark_results
 
 
-def calculate_accuracy(results: list[dict]) -> float:
-    """Calculate accuracy from a list of judge result dicts.
+def calculate_accuracy(results: list[dict]) -> dict[str, float]:
+    """Calculate accuracy breakdown from a list of judge result dicts.
 
     Args:
-        results: A list of dicts with "verdict" keys (True/False).
+        results: A list of dicts with "verdict" keys ("correct", "incorrect", "no_answer").
 
     Returns:
-        Accuracy as a float between 0.0 and 1.0.
+        Dict with "correct", "incorrect", "no_answer" rates (each 0.0-1.0).
 
     Raises:
         ValueError: If the results list is empty.
     """
     if not results:
         raise ValueError("Results list is empty.")
-    return sum(1 for r in results if r["verdict"]) / len(results)
+    n = len(results)
+    correct = sum(1 for r in results if r["verdict"] == "correct") / n
+    incorrect = sum(1 for r in results if r["verdict"] == "incorrect") / n
+    no_answer = sum(1 for r in results if r["verdict"] == "no_answer") / n
+    return {"correct": correct, "incorrect": incorrect, "no_answer": no_answer}
 
 
 def save_judged_results(
@@ -365,6 +399,6 @@ if __name__ == "__main__":
         judge_model_label = args.model
 
     accuracy = calculate_accuracy(results)
-    print(f"input: {args.file}, results: {accuracy}")
+    print(f"input: {args.file}, correct: {accuracy['correct']:.2%}, incorrect: {accuracy['incorrect']:.2%}, no_answer: {accuracy['no_answer']:.2%}")
 
     save_judged_results(benchmark_results, results, judge_model_label, output_path)
