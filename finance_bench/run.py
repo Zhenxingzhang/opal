@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from opal import AgentConfig, Runner
+from opal import AgentConfig, Runner, RunnerConfig
 from opal.config import load_config
 from opal.environment.tool_environment import SEARCH_PDF_TOOL
 from opal.environment.tool_environment import ToolEnvironment
@@ -39,22 +39,23 @@ MAX_CONCURRENT_TASKS = 10
 
 
 async def process_question(
-    semaphore: asyncio.Semaphore,
+    concurrency_limiter: asyncio.Semaphore,
     agent_config: AgentConfig,
+    runner_config: RunnerConfig,
     question_row: pd.Series,
     results_queue: asyncio.Queue,
     run_timestamp: str,
     retrieval_model_name: str = "all-MiniLM-L6-v2",
 ):
     """Process a single question with concurrency control."""
-    async with semaphore:
+    async with concurrency_limiter:
         doc_name = question_row["doc_name"]
         # doc_name = "all"
         print(f"doc_name: {doc_name}")
         retriever = build_retriever(doc_name, model_name=retrieval_model_name)
         print(f"retriever: {retriever.summary()}")
         tool_env = ToolEnvironment(retriever=retriever)
-        runner = Runner(config=agent_config, env=tool_env, run_timestamp=run_timestamp)
+        runner = Runner(config=agent_config, runner_config=runner_config, env=tool_env, run_timestamp=run_timestamp)
         question = question_row["question"]
         print(f"Processing: {question_row['financebench_id']} - {question[:50]}...")
 
@@ -80,16 +81,16 @@ async def process_question(
         print(f"Completed: {question_row['financebench_id']}")
 
 
-async def write_results(output_file: Path, results_queue: asyncio.Queue, total: int):
+async def write_results(output_path: Path, results_queue: asyncio.Queue, total_questions: int):
     """Write results to file as they complete."""
-    written = 0
-    with open(output_file, "w") as f:
-        while written < total:
+    results_written = 0
+    with open(output_path, "w") as results_file:
+        while results_written < total_questions:
             result = await results_queue.get()
-            f.write(json.dumps(result) + "\n")
-            f.flush()
-            written += 1
-            print(f"Progress: {written}/{total}")
+            results_file.write(json.dumps(result) + "\n")
+            results_file.flush()
+            results_written += 1
+            print(f"Progress: {results_written}/{total_questions}")
 
 
 async def main(
@@ -128,48 +129,49 @@ async def main(
     selected_doc_names = df_questions["doc_name"].unique().tolist()
     print(f"Number of distinct PDF: {len(selected_doc_names)}")
 
-    experiment = load_config(config_path)
-    agent_config = experiment.agent
-    max_concurrent = experiment.runner.parallelism
-    retrieval_model_name = experiment.semantic_retrieval.model_name
-    print(f"Experiment: {experiment.name}")
+    experiment_config = load_config(config_path)
+    agent_config = experiment_config.agent
+    runner_config = experiment_config.runner
+    max_concurrent = runner_config.parallelism
+    retrieval_model_name = experiment_config.semantic_retrieval.model_name
+    print(f"Experiment: {experiment_config.name}")
 
     # Shared timestamp for this run
     run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # Output file path
-    output_file = Path(
+    output_path = Path(
         PATH_RESULTS,
         f"{agent_config.agent_name}_{agent_config.get_system_prompt_name()}_{agent_config.model_name}_{EVAL_MODE}_{run_timestamp}.jsonl",
     )
 
     # Ensure results directory exists
-    os.makedirs(output_file.parent, exist_ok=True)
+    os.makedirs(output_path.parent, exist_ok=True)
 
     print(f"Running with max {max_concurrent} concurrent tasks")
 
     # Create semaphore for concurrency control
-    semaphore = asyncio.Semaphore(max_concurrent)
+    concurrency_limiter = asyncio.Semaphore(max_concurrent)
     results_queue = asyncio.Queue()
 
     # Create tasks for all questions
-    question_tasks = [
-        process_question(semaphore, agent_config, row, results_queue, run_timestamp, retrieval_model_name)
-        for _, row in df_questions.iterrows()
+    question_coroutines = [
+        process_question(concurrency_limiter, agent_config, runner_config, question_row, results_queue, run_timestamp, retrieval_model_name)
+        for _, question_row in df_questions.iterrows()
     ]
 
     # Start writer task
     writer_task = asyncio.create_task(
-        write_results(output_file, results_queue, len(question_tasks))
+        write_results(output_path, results_queue, len(question_coroutines))
     )
 
     # Run all question tasks
-    await asyncio.gather(*question_tasks)
+    await asyncio.gather(*question_coroutines)
 
     # Wait for writer to finish
     await writer_task
 
-    print(f"\n\nCompleted. Results written to: {output_file}")
+    print(f"\n\nCompleted. Results written to: {output_path}")
 
 
 if __name__ == "__main__":

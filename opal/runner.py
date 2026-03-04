@@ -39,13 +39,20 @@ AGENT_REGISTRY = {
 
 
 @dataclass
+class RunnerConfig:
+    """Configuration for the Runner execution loop."""
+
+    max_steps: int = 10
+    parallelism: int = 1
+
+
+@dataclass
 class AgentConfig:
-    """Configuration for Runner and Agent."""
+    """Configuration for Agent policy."""
 
     model_name: str = "gpt-4o-2024-11-20"
     agent_name: str = "react"  # "react" or "default" - determines agent type and prompt
     temperature: float = 0.0
-    max_steps: int = 10
     log_llm_calls: bool = False
     tools: list[Tool] = field(default_factory=list)
     system_prompt_name: str | None = None  # Optional custom prompt name
@@ -76,10 +83,12 @@ class Runner:
     def __init__(
         self,
         config: AgentConfig | None = None,
+        runner_config: RunnerConfig | None = None,
         run_timestamp: str | None = None,
         env: ToolEnvironment | None = None,
     ):
         self.config = config or AgentConfig()
+        self.runner_config = runner_config or RunnerConfig()
         self.run_timestamp = run_timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
         self.env = env
         self.agent = self._build_agent()
@@ -113,10 +122,11 @@ class Runner:
     def _execute_loop(self, user_query: str) -> str:
         """Run the canonical agent loop (sync)."""
         session = self.session
+        max_steps = self.runner_config.max_steps
         session.add_step(Step(role="user", content=user_query))
         self.agent.pre_loop(session, self.env)
 
-        for step_idx in range(self.agent.max_steps):
+        for step_idx in range(max_steps):
             messages = self.agent.build_messages(session)
             response = self.agent.act(messages, session)
 
@@ -128,15 +138,16 @@ class Runner:
 
             return self.agent.finish(response, session, step_idx)
 
-        return self.agent.max_steps_exceeded(session)
+        return self.agent.max_steps_exceeded(session, max_steps)
 
     async def _execute_loop_async(self, user_query: str) -> str:
         """Run the canonical agent loop (async)."""
         session = self.session
+        max_steps = self.runner_config.max_steps
         session.add_step(Step(role="user", content=user_query))
         self.agent.pre_loop(session, self.env)
 
-        for step_idx in range(self.agent.max_steps):
+        for step_idx in range(max_steps):
             messages = self.agent.build_messages(session)
             response = await self.agent.act_async(messages, session)
 
@@ -148,7 +159,7 @@ class Runner:
 
             return self.agent.finish(response, session, step_idx)
 
-        return self.agent.max_steps_exceeded(session)
+        return self.agent.max_steps_exceeded(session, max_steps)
 
     # ------------------------------------------------------------------
     # Public API

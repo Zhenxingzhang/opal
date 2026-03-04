@@ -88,7 +88,6 @@ class Agent:
     system_prompt: str = ""
     model: LLMModel
     tools: list[Tool] = []
-    max_steps: int = 10
     verbose: bool = True
 
     def _init_common(self, config) -> None:
@@ -169,9 +168,9 @@ class Agent:
         self._log_answer(answer)
         return answer
 
-    def max_steps_exceeded(self, session: Session) -> str:
+    def max_steps_exceeded(self, session: Session, max_steps: int) -> str:
         """Handle the case where the agent exhausted its step budget."""
-        session.metadata["steps"] = self.max_steps
+        session.metadata["steps"] = max_steps
         session.metadata["status"] = "max_steps_exceeded"
         last = (
             session.trajectory[-1].content or session.trajectory[-1].tool_result or ""
@@ -216,7 +215,6 @@ class DefaultAgent(Agent):
     def __init__(self, config, **kwargs):
         self._init_common(config)
         self.tools = []
-        self.max_steps = 1
 
 
 class ReActAgent(Agent):
@@ -235,7 +233,6 @@ class ReActAgent(Agent):
     def __init__(self, config, **kwargs):
         self._init_common(config)
         self.tools = config.tools or []
-        self.max_steps = config.max_steps
 
 
 class AdvancedReActAgent(Agent):
@@ -258,7 +255,6 @@ class AdvancedReActAgent(Agent):
     def __init__(self, config, **kwargs):
         self._init_common(config)
         self.tools = config.tools or []
-        self.max_steps = config.max_steps
 
     def build_messages(self, session: Session) -> list[dict]:
         """Build LLM messages, merging consecutive Thought+Action step pairs.
@@ -376,7 +372,6 @@ class RAGAgent(Agent):
         from opal.environment.tool_environment import SEARCH_PDF_TOOL
 
         self.tools = [SEARCH_PDF_TOOL]
-        self.max_steps = 1
         self.retriever_top_k = getattr(config, "retriever_top_k", 5)
 
     def pre_loop(self, session: Session, env) -> None:

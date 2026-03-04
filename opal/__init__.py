@@ -11,8 +11,8 @@ from opal.agentic.agent import (
 )
 from opal.agentic.llm_model import LLMModel, OpenAIModel, AnthropicModel
 from opal.environment.tool_environment import ToolEnvironment
-from opal.runner import Runner, AgentConfig
-from opal.config import ExperimentConfig, RunnerConfig, SemanticRetrievalConfig, load_config
+from opal.runner import Runner, AgentConfig, RunnerConfig
+from opal.config import ExperimentConfig, SemanticRetrievalConfig, load_config
 
 __all__ = [
     "Agent",

@@ -19,7 +19,7 @@ from opal.environment.tool_environment import (
     READ_PDF_TOOL,
     SEARCH_WEB_TOOL,
 )
-from opal.runner import AgentConfig
+from opal.runner import AgentConfig, RunnerConfig
 
 TOOL_REGISTRY: dict[str, Tool] = {
     "calculator": CALCULATOR_TOOL,
@@ -27,14 +27,6 @@ TOOL_REGISTRY: dict[str, Tool] = {
     "read_pdf": READ_PDF_TOOL,
     "search_web": SEARCH_WEB_TOOL,
 }
-
-
-@dataclass
-class RunnerConfig:
-    """Configuration for the Runner execution loop."""
-
-    max_steps: int = 10
-    parallelism: int = 1
 
 
 @dataclass
@@ -132,11 +124,10 @@ def load_config(path: str | Path) -> ExperimentConfig:
     retrieval_data = data.get("semantic_retrieval", {})
     retrieval_config = SemanticRetrievalConfig(**retrieval_data)
 
-    # Parse agent section — bridge runner.max_steps into AgentConfig.max_steps
+    # Parse agent section
     agent_data = data.get("agent", {})
     tool_names = agent_data.pop("tools", [])
     tools = _resolve_tools(tool_names, path)
-    agent_data.setdefault("max_steps", runner_config.max_steps)
     # Bridge semantic_retrieval.top_k into AgentConfig.retriever_top_k
     agent_data.setdefault("retriever_top_k", retrieval_config.top_k)
     agent_config = AgentConfig(tools=tools, **agent_data)

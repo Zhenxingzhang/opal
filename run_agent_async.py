@@ -1,8 +1,9 @@
 """Async demo script for the agent environment."""
 
+import argparse
 import asyncio
 
-from opal.runner import Runner, AgentConfig
+from opal.runner import Runner, AgentConfig, RunnerConfig
 from opal.environment.tool_environment import (
     CALCULATOR_TOOL,
     SEARCH_WEB_TOOL,
@@ -11,17 +12,18 @@ from opal.environment.tool_environment import (
 
 
 async def main():
+    parser = argparse.ArgumentParser(description="Run an LLM agent (async).")
+    parser.add_argument("query", type=str, help="User query to send to the agent.")
+    args = parser.parse_args()
+
     config = AgentConfig(
         model_name="gpt-4o-2024-11-20",
         agent_name="react",
-        max_steps=10,
         log_llm_calls=True,
         tools=[CALCULATOR_TOOL, SEARCH_WEB_TOOL, READ_PDF_TOOL],
     )
-    runner = Runner(config=config)
-    answer = await runner.run_async(
-        "read the /Users/zzhang/Downloads/2601.18226.pdf file and tell me in one sentence what its about"
-    )
+    runner = Runner(config=config, runner_config=RunnerConfig(max_steps=10))
+    answer = await runner.run_async(args.query)
 
     print("\n\nFinal answer:", answer)
     runner.print_trajectory()
