@@ -1,6 +1,6 @@
 """Example: index documents and query them using SemanticRetriever."""
 
-from llm_agents.embedding import SemanticRetriever
+from opal.embedding import SemanticRetriever
 
 # Example documents to index
 DOCS = [

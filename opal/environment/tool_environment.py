@@ -18,8 +18,8 @@ from typing import Any
 
 import fitz
 
-from llm_agents.environment.tool import Tool
-from llm_agents.embedding.semantic_retriever import SemanticRetriever
+from opal.environment.tool import Tool
+from opal.embedding.semantic_retriever import SemanticRetriever
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,8 @@
-# Agentic Design - llm_agents
+# Agentic Design - Opal
 
 ## Architecture Overview
 
-The llm_agents codebase implements a **modular agentic framework** with three main layers:
+The Opal codebase implements a **modular agentic framework** with three main layers:
 
 1. **Agentic Layer** - LLM models and agent logic
 2. **Environment Layer** - Session/step management and trajectory tracking
@@ -38,7 +38,7 @@ The llm_agents codebase implements a **modular agentic framework** with three ma
 
 ## Key Abstractions
 
-### 1. Agent (`llm_agents/agentic/agent.py`)
+### 1. Agent (`opal/agentic/agent.py`)
 
 **Base Class: `Agent` (Abstract)**
 - Defines the interface for all agents
@@ -54,7 +54,7 @@ The llm_agents codebase implements a **modular agentic framework** with three ma
 | `DefaultAgent` | Single LLM call, no tools | Simple completions, summarization |
 | `ReActAgent` | Reasoning + Acting loop with tools | Complex tasks requiring multiple steps |
 
-### 2. LLM Model (`llm_agents/agentic/llm_model.py`)
+### 2. LLM Model (`opal/agentic/llm_model.py`)
 
 **Base Class: `LLMModel` (Abstract)**
 - Standardizes interface across providers
@@ -79,7 +79,7 @@ class ModelResponse:
     raw_response: Any
 ```
 
-### 3. Tool (`llm_agents/agentic/tool.py`)
+### 3. Tool (`opal/agentic/tool.py`)
 
 ```python
 @dataclass
@@ -96,7 +96,7 @@ class Tool:
 - `READ_PDF_TOOL` - PDF text extraction (PyMuPDF)
 - `SEARCH_WEB_TOOL` - Web search (DuckDuckGo)
 
-### 4. Session & Step (`llm_agents/environment/`)
+### 4. Session & Step (`opal/environment/`)
 
 **Session** - Manages conversation state:
 - `id` - Unique session identifier (UUID)
@@ -109,7 +109,7 @@ class Tool:
 - `tool_call` - Dict with {id, name, arguments}
 - `tool_result` - Tool execution output
 
-### 5. Runner (`llm_agents/runner.py`)
+### 5. Runner (`opal/runner.py`)
 
 Orchestrates agent execution:
 - Creates and manages Session
@@ -225,8 +225,8 @@ Return result as observation
 ## Usage Example
 
 ```python
-from llm_agents import Runner, AgentConfig
-from llm_agents.environment.builtin_tools import CALCULATOR_TOOL, SEARCH_WEB_TOOL
+from opal import Runner, AgentConfig
+from opal.environment.builtin_tools import CALCULATOR_TOOL, SEARCH_WEB_TOOL
 
 # Configure agent
 config = AgentConfig(
@@ -250,7 +250,7 @@ runner.print_trajectory()  # Pretty print
 ## File Structure
 
 ```
-llm_agents/
+opal/
 ├── __init__.py              # Public API exports
 ├── runner.py                # Orchestration (AgentConfig, Runner)
 ├── agentic/

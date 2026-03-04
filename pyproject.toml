@@ -1,5 +1,5 @@
 [project]
-name = "llm-agents"
+name = "opal"
 version = "0.1.0"
 description = "Experimental code for LLM-based agentic design"
 readme = "README.md"
@@ -17,6 +17,7 @@ dependencies = [
     "huggingface-hub>=0.20.0",
     "sentence-transformers>=3.0.0",
     "tenacity>=8.2.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -24,8 +25,12 @@ dev = [
     "ruff>=0.4.0",
 ]
 
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [tool.setuptools.packages.find]
-include = ["llm_agents*"]
+include = ["opal*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.txt"]

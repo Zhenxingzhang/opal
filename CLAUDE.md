@@ -2,14 +2,14 @@
 
 ## Project Overview
 
-LLM agents framework for agent reinforcement learning research. Provides a modular system for building LLM-based agents with tool use and multi-step reasoning, with an initial focus on financial domain benchmarking (FinanceBench).
+LLM agents framework (Opal) for agent reinforcement learning research. Provides a modular system for building LLM-based agents with tool use and multi-step reasoning, with an initial focus on financial domain benchmarking (FinanceBench).
 
 ### Architecture
 
 Three-layer design:
-- **Agentic** (`llm_agents/agentic/`): LLM model abstractions (OpenAI, Anthropic), agent implementations (DefaultAgent, ReActAgent), tool definitions
-- **Environment** (`llm_agents/environment/`): Session state, step/trajectory tracking
-- **Orchestration** (`llm_agents/runner.py`): Runner coordinates agent execution via AgentConfig
+- **Agentic** (`opal/agentic/`): LLM model abstractions (OpenAI, Anthropic), agent implementations (DefaultAgent, ReActAgent), tool definitions
+- **Environment** (`opal/environment/`): Session state, step/trajectory tracking
+- **Orchestration** (`opal/runner.py`): Runner coordinates agent execution via AgentConfig
 
 Key entry points:
 - `run_agent.py` / `run_agent_async.py` — demo scripts
@@ -55,6 +55,6 @@ uv run ruff format .
 ## Key Patterns
 
 - `AGENT_REGISTRY` maps agent names (`"default"`, `"react"`) to implementations and prompts
-- Prompts live in `llm_agents/prompt/` as `.txt` files
+- Prompts live in `opal/prompt/` as `.txt` files
 - LLM call logs go to `results/llm_calls/` when `log_llm_calls=True`
 - Evaluation cache in `.eval_cache/`

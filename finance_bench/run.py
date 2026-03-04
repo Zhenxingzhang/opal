@@ -1,15 +1,19 @@
 import asyncio
 from datetime import datetime
 import json
+import logging
 import os
 from pathlib import Path
 
 import pandas as pd
 
-from llm_agents import AgentConfig, Runner
-from llm_agents.environment.tool_environment import SEARCH_WEB_TOOL, SEARCH_PDF_TOOL
-from llm_agents.environment.tool_environment import ToolEnvironment
+from opal import AgentConfig, Runner
+from opal.config import load_config
+from opal.environment.tool_environment import SEARCH_PDF_TOOL
+from opal.environment.tool_environment import ToolEnvironment
 from utils import build_retriever, PATH_ROOT, PATH_FINANCE_BENCH
+
+logging.basicConfig(level=logging.INFO)
 
 ##############################################################################
 # DATASET CONFIG
@@ -27,10 +31,8 @@ PATH_DOCUMENT_INFO_JSONL = (
 # - CLOSED_SOURCE: Closed Source Part --> Request access at contact@patronus.ai
 DATASET_PORTION = "OPEN_SOURCE"
 
-# Model config
-MODEL_NAME = "gpt-4o-2024-11-20"
+# Experiment metadata
 EVAL_MODE = "closedBook"
-TEMPERATURE = 0.0
 
 # Concurrency config
 MAX_CONCURRENT_TASKS = 10
@@ -38,40 +40,44 @@ MAX_CONCURRENT_TASKS = 10
 
 async def process_question(
     semaphore: asyncio.Semaphore,
-    config: AgentConfig,
-    row: pd.Series,
+    agent_config: AgentConfig,
+    question_row: pd.Series,
     results_queue: asyncio.Queue,
     run_timestamp: str,
+    retrieval_model_name: str = "all-MiniLM-L6-v2",
 ):
     """Process a single question with concurrency control."""
     async with semaphore:
-        doc_name = row["doc_name"]
-        retriever = build_retriever(doc_name)
-        env = ToolEnvironment(retriever=retriever)
-        runner = Runner(config=config, env=env, run_timestamp=run_timestamp)
-        question = row["question"]
-        print(f"Processing: {row['financebench_id']} - {question[:50]}...")
+        doc_name = question_row["doc_name"]
+        # doc_name = "all"
+        print(f"doc_name: {doc_name}")
+        retriever = build_retriever(doc_name, model_name=retrieval_model_name)
+        print(f"retriever: {retriever.summary()}")
+        tool_env = ToolEnvironment(retriever=retriever)
+        runner = Runner(config=agent_config, env=tool_env, run_timestamp=run_timestamp)
+        question = question_row["question"]
+        print(f"Processing: {question_row['financebench_id']} - {question[:50]}...")
 
         try:
             model_answer = await runner.run_async(question)
         except Exception as e:
-            print(f"Error processing {row['financebench_id']}: {e}")
+            print(f"Error processing {question_row['financebench_id']}: {e}")
             model_answer = f"Error: {e}"
 
-        result = {
-            "financebench_id": row["financebench_id"],
-            "model_name": MODEL_NAME,
+        question_result = {
+            "financebench_id": question_row["financebench_id"],
+            "model_name": agent_config.model_name,
             "system_prompt": runner.agent.system_prompt,
             "tools": [tool.name for tool in runner.agent.tools],
             "eval_mode": EVAL_MODE,
-            "temp": TEMPERATURE,
+            "temp": agent_config.temperature,
             "question": question,
-            "gold_answer": row["answer"],
+            "gold_answer": question_row["answer"],
             "model_answer": model_answer,
             "label": "",  # To be filled by evaluation
         }
-        await results_queue.put(result)
-        print(f"Completed: {row['financebench_id']}")
+        await results_queue.put(question_result)
+        print(f"Completed: {question_row['financebench_id']}")
 
 
 async def write_results(output_file: Path, results_queue: asyncio.Queue, total: int):
@@ -87,7 +93,9 @@ async def write_results(output_file: Path, results_queue: asyncio.Queue, total: 
 
 
 async def main(
-    max_concurrent: int = MAX_CONCURRENT_TASKS, max_tasks: int | None = None
+    config_path: str,
+    max_concurrent: int = MAX_CONCURRENT_TASKS,
+    max_tasks: int | None = None,
 ):
     ##############################################################################
     # LOAD DATASET
@@ -100,8 +108,8 @@ async def main(
 
     # Get all docs
     df_questions = df_questions.sort_values("doc_name")
-    ALL_DOCS = df_questions["doc_name"].unique().tolist()
-    print(f"Total number of distinct PDF: {len(ALL_DOCS)}")
+    all_doc_names = df_questions["doc_name"].unique().tolist()
+    print(f"Total number of distinct PDF: {len(all_doc_names)}")
 
     # Select relevant dataset portion
     if DATASET_PORTION != "ALL":
@@ -117,17 +125,14 @@ async def main(
 
     # Check relevant documents
     df_questions = df_questions.sort_values("doc_name")
-    docs = df_questions["doc_name"].unique().tolist()
-    print(f"Number of distinct PDF: {len(docs)}")
+    selected_doc_names = df_questions["doc_name"].unique().tolist()
+    print(f"Number of distinct PDF: {len(selected_doc_names)}")
 
-    config = AgentConfig(
-        model_name=MODEL_NAME,
-        agent_name="advanced_react",
-        # system_prompt_name="finance/react_prompt_default",
-        max_steps=10,
-        log_llm_calls=True,
-        tools=[SEARCH_PDF_TOOL],
-    )
+    experiment = load_config(config_path)
+    agent_config = experiment.agent
+    max_concurrent = experiment.runner.parallelism
+    retrieval_model_name = experiment.semantic_retrieval.model_name
+    print(f"Experiment: {experiment.name}")
 
     # Shared timestamp for this run
     run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -135,7 +140,7 @@ async def main(
     # Output file path
     output_file = Path(
         PATH_RESULTS,
-        f"{config.agent_name}_{config.get_system_prompt_name()}_{MODEL_NAME}_{EVAL_MODE}_{run_timestamp}.jsonl",
+        f"{agent_config.agent_name}_{agent_config.get_system_prompt_name()}_{agent_config.model_name}_{EVAL_MODE}_{run_timestamp}.jsonl",
     )
 
     # Ensure results directory exists
@@ -148,18 +153,18 @@ async def main(
     results_queue = asyncio.Queue()
 
     # Create tasks for all questions
-    tasks = [
-        process_question(semaphore, config, row, results_queue, run_timestamp)
+    question_tasks = [
+        process_question(semaphore, agent_config, row, results_queue, run_timestamp, retrieval_model_name)
         for _, row in df_questions.iterrows()
     ]
 
     # Start writer task
     writer_task = asyncio.create_task(
-        write_results(output_file, results_queue, len(tasks))
+        write_results(output_file, results_queue, len(question_tasks))
     )
 
     # Run all question tasks
-    await asyncio.gather(*tasks)
+    await asyncio.gather(*question_tasks)
 
     # Wait for writer to finish
     await writer_task
@@ -171,6 +176,12 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Run finance benchmark evaluation")
+    parser.add_argument(
+        "--config",
+        type=str,
+        required=True,
+        help="Path to a YAML experiment config file",
+    )
     parser.add_argument(
         "--concurrency",
         "-c",
@@ -187,4 +198,4 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    asyncio.run(main(max_concurrent=args.concurrency, max_tasks=args.max_tasks))
+    asyncio.run(main(max_concurrent=args.concurrency, max_tasks=args.max_tasks, config_path=args.config))

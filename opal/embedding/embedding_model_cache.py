@@ -20,7 +20,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from llm_agents.embedding.transformers_cache import get_sentence_transformers_cache_dir
+from opal.embedding.transformers_cache import get_sentence_transformers_cache_dir
 
 logger = logging.getLogger(__name__)
 

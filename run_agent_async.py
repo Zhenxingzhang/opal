@@ -2,8 +2,8 @@
 
 import asyncio
 
-from llm_agents.runner import Runner, AgentConfig
-from llm_agents.environment.tool_environment import (
+from opal.runner import Runner, AgentConfig
+from opal.environment.tool_environment import (
     CALCULATOR_TOOL,
     SEARCH_WEB_TOOL,
     READ_PDF_TOOL,

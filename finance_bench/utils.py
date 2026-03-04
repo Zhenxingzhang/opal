@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pymupdf
 
-from llm_agents.embedding import SemanticRetriever
+from opal.embedding import SemanticRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +67,16 @@ def chunk_text(
     return chunks
 
 
-def build_retriever(docs: list[str] | str) -> SemanticRetriever:
+def build_retriever(
+    docs: list[str] | str,
+    model_name: str = "all-MiniLM-L6-v2",
+) -> SemanticRetriever:
     """Build a SemanticRetriever indexed on the given PDF documents.
 
     Args:
         docs: A single document name, a list of document names,
               or ``"all"`` to index every PDF in the pdfs folder.
+        model_name: SentenceTransformer model name for the retriever.
 
     Returns:
         A ``SemanticRetriever`` ready for search queries.
@@ -92,6 +96,6 @@ def build_retriever(docs: list[str] | str) -> SemanticRetriever:
         all_chunks.extend(chunks)
 
     logger.info("Indexing %d total chunks from %d documents", len(all_chunks), len(docs))
-    retriever = SemanticRetriever()
-    retriever.index(all_chunks)
+    retriever = SemanticRetriever(model_name=model_name)
+    retriever.index(all_chunks, num_docs=len(docs))
     return retriever

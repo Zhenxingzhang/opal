@@ -3,7 +3,7 @@ Runner orchestrates agent execution.
 
 The Runner:
 - Creates and manages the Session
-- Delegates execution to the Agent
+- Owns the canonical execution loop (mediates between Agent and ToolEnvironment)
 - Provides utilities for debugging/inspection
 """
 
@@ -13,18 +13,18 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from llm_agents.environment.step import Step
-from llm_agents.environment.tool_environment import ToolEnvironment
-from llm_agents.environment.tool import Tool
-from llm_agents.environment.session import Session
-from llm_agents.agentic.agent import (
+from opal.environment.step import Step
+from opal.environment.tool_environment import ToolEnvironment
+from opal.environment.tool import Tool
+from opal.environment.session import Session
+from opal.agentic.agent import (
     Agent,
     ReActAgent,
     DefaultAgent,
     AdvancedReActAgent,
     RAGAgent,
 )
-from llm_agents.agentic.llm_model import RESULTS_DIR
+from opal.agentic.llm_model import RESULTS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +44,13 @@ class AgentConfig:
 
     model_name: str = "gpt-4o-2024-11-20"
     agent_name: str = "react"  # "react" or "default" - determines agent type and prompt
+    temperature: float = 0.0
     max_steps: int = 10
     log_llm_calls: bool = False
     tools: list[Tool] = field(default_factory=list)
     system_prompt_name: str | None = None  # Optional custom prompt name
+    verbose: bool = True
+    retriever_top_k: int = 5  # Number of chunks for RAGAgent retrieval
 
     def get_system_prompt_name(self) -> str:
         """Get the prompt name for this agent.
@@ -65,26 +68,24 @@ class Runner:
     """
     Orchestrates agent execution.
 
-    The Runner creates a session, delegates to the appropriate agent,
-    and provides access to results.
+    The Runner creates a session, owns the canonical execution loop that
+    mediates between Agent (policy) and ToolEnvironment (MDP), and
+    provides access to results.
     """
 
     def __init__(
         self,
         config: AgentConfig | None = None,
-        verbose: bool = False,
         run_timestamp: str | None = None,
         env: ToolEnvironment | None = None,
-        **agent_kwargs,
     ):
         self.config = config or AgentConfig()
         self.run_timestamp = run_timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
         self.env = env
-        self.agent = self._build_agent(verbose, **agent_kwargs)
+        self.agent = self._build_agent()
         self.session = Session()
-        self.verbose = verbose
 
-    def _build_agent(self, verbose: bool, **agent_kwargs) -> Agent:
+    def _build_agent(self) -> Agent:
         """Build the appropriate agent based on config."""
         agent_name = self.config.agent_name
 
@@ -94,21 +95,64 @@ class Runner:
 
         agent_class, _ = AGENT_REGISTRY[agent_name]
 
-        agent = agent_class(
-            config=self.config,
-            verbose=verbose,
-            **agent_kwargs,
-        )
+        agent = agent_class(config=self.config)
 
         # Build ToolEnvironment: merge caller-supplied env with the tool map
         # derived from the agent's declared tools.
         tool_map = {t.name: t for t in agent.tools}
         if self.env is not None:
             self.env.tool_map = tool_map
-            agent.env = self.env
         else:
-            agent.env = ToolEnvironment(tool_map=tool_map)
+            self.env = ToolEnvironment(tool_map=tool_map)
         return agent
+
+    # ------------------------------------------------------------------
+    # Canonical execution loop
+    # ------------------------------------------------------------------
+
+    def _execute_loop(self, user_query: str) -> str:
+        """Run the canonical agent loop (sync)."""
+        session = self.session
+        session.add_step(Step(role="user", content=user_query))
+        self.agent.pre_loop(session, self.env)
+
+        for step_idx in range(self.agent.max_steps):
+            messages = self.agent.build_messages(session)
+            response = self.agent.act(messages, session)
+
+            if response.tool_calls:
+                tc = response.tool_calls[0]
+                observation = self.env.execute_tool(tc.name, tc.arguments)
+                self.agent.record_tool_cycle(response, observation, session, step_idx)
+                continue
+
+            return self.agent.finish(response, session, step_idx)
+
+        return self.agent.max_steps_exceeded(session)
+
+    async def _execute_loop_async(self, user_query: str) -> str:
+        """Run the canonical agent loop (async)."""
+        session = self.session
+        session.add_step(Step(role="user", content=user_query))
+        self.agent.pre_loop(session, self.env)
+
+        for step_idx in range(self.agent.max_steps):
+            messages = self.agent.build_messages(session)
+            response = await self.agent.act_async(messages, session)
+
+            if response.tool_calls:
+                tc = response.tool_calls[0]
+                observation = self.env.execute_tool(tc.name, tc.arguments)
+                self.agent.record_tool_cycle(response, observation, session, step_idx)
+                continue
+
+            return self.agent.finish(response, session, step_idx)
+
+        return self.agent.max_steps_exceeded(session)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def reset(self):
         """Clear session for a fresh run."""
@@ -125,6 +169,7 @@ class Runner:
             "query": user_query,
             "agent": self.agent.system_prompt_name,
             "model": self.agent.model.get_name(),
+            "retriever": self.env.retriever.summary() if self.env.retriever else None,
         }
 
         if self.config.log_llm_calls:
@@ -132,7 +177,7 @@ class Runner:
                 True, session_id=self.session.id, timestamp=self.run_timestamp
             )
 
-        result = self.agent.run(user_query, self.session)
+        result = self._execute_loop(user_query)
         self._log_trajectory()
         return result
 
@@ -147,6 +192,7 @@ class Runner:
             "query": user_query,
             "agent": self.agent.system_prompt_name,
             "model": self.agent.model.get_name(),
+            "retriever": self.env.retriever.summary() if self.env.retriever else None,
         }
 
         if self.config.log_llm_calls:
@@ -154,7 +200,7 @@ class Runner:
                 True, session_id=self.session.id, timestamp=self.run_timestamp
             )
 
-        result = await self.agent.run_async(user_query, self.session)
+        result = await self._execute_loop_async(user_query)
         self._log_trajectory()
         return result
 

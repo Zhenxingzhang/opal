@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from llm_agents.environment.step import Step
+from opal.environment.step import Step
 
 
 @dataclass

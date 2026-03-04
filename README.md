@@ -1,6 +1,6 @@
-# llm_agents
+# opal
 
-Experimental code for LLM-based agentic design and reinforcement learning research.
+Open Platform for Agentic Learning — experimental code for LLM-based agentic design and reinforcement learning research.
 
 ## Setup
 
