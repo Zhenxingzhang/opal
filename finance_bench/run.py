@@ -7,9 +7,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from opal import AgentConfig, Runner, RunnerConfig
+from opal import AgentConfig, SessionRunner, SessionConfig
 from opal.config import load_config
-from opal.environment.tool_environment import SEARCH_PDF_TOOL
 from opal.environment.tool_environment import ToolEnvironment
 from utils import build_retriever, PATH_ROOT, PATH_FINANCE_BENCH
 
@@ -41,7 +40,7 @@ MAX_CONCURRENT_TASKS = 10
 async def process_question(
     concurrency_limiter: asyncio.Semaphore,
     agent_config: AgentConfig,
-    runner_config: RunnerConfig,
+    session_config: SessionConfig,
     question_row: pd.Series,
     results_queue: asyncio.Queue,
     run_timestamp: str,
@@ -50,17 +49,21 @@ async def process_question(
     """Process a single question with concurrency control."""
     async with concurrency_limiter:
         doc_name = question_row["doc_name"]
-        # doc_name = "all"
         print(f"doc_name: {doc_name}")
         retriever = build_retriever(doc_name, model_name=retrieval_model_name)
         print(f"retriever: {retriever.summary()}")
         tool_env = ToolEnvironment(retriever=retriever)
-        runner = Runner(config=agent_config, runner_config=runner_config, env=tool_env, run_timestamp=run_timestamp)
+        session_runner = SessionRunner(
+            session_config=session_config,
+            agent_config=agent_config,
+            env=tool_env,
+            session_timestamp=run_timestamp,
+        )
         question = question_row["question"]
         print(f"Processing: {question_row['financebench_id']} - {question[:50]}...")
 
         try:
-            model_answer = await runner.run_async(question)
+            model_answer = await session_runner.run_async(question)
         except Exception as e:
             print(f"Error processing {question_row['financebench_id']}: {e}")
             model_answer = f"Error: {e}"
@@ -68,8 +71,8 @@ async def process_question(
         question_result = {
             "financebench_id": question_row["financebench_id"],
             "model_name": agent_config.model_name,
-            "system_prompt": runner.agent.system_prompt,
-            "tools": [tool.name for tool in runner.agent.tools],
+            "system_prompt": session_runner.agent.system_prompt,
+            "tools": [tool.name for tool in session_runner.agent.tools],
             "eval_mode": EVAL_MODE,
             "temp": agent_config.temperature,
             "question": question,
@@ -81,7 +84,9 @@ async def process_question(
         print(f"Completed: {question_row['financebench_id']}")
 
 
-async def write_results(output_path: Path, results_queue: asyncio.Queue, total_questions: int):
+async def write_results(
+    output_path: Path, results_queue: asyncio.Queue, total_questions: int
+):
     """Write results to file as they complete."""
     results_written = 0
     with open(output_path, "w") as results_file:
@@ -130,20 +135,22 @@ async def main(
     print(f"Number of distinct PDF: {len(selected_doc_names)}")
 
     experiment_config = load_config(config_path)
-    agent_config = experiment_config.agent
-    runner_config = experiment_config.runner
-    max_concurrent = runner_config.parallelism
-    retrieval_model_name = experiment_config.semantic_retrieval.model_name
+    agent_config = experiment_config.agent_config
+    session_config = experiment_config.session_config
+    max_concurrent = experiment_config.parallelism
+    retrieval_model_name = experiment_config.sem_retrieval_config.model_name
     print(f"Experiment: {experiment_config.name}")
 
     # Shared timestamp for this run
     run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # Output file path
+    output_folder = Path(PATH_RESULTS, f"{experiment_config.name}_{run_timestamp}")
     output_path = Path(
-        PATH_RESULTS,
+        output_folder,
         f"{agent_config.agent_name}_{agent_config.get_system_prompt_name()}_{agent_config.model_name}_{EVAL_MODE}_{run_timestamp}.jsonl",
     )
+    session_config.logging_dir = output_folder
 
     # Ensure results directory exists
     os.makedirs(output_path.parent, exist_ok=True)
@@ -156,7 +163,15 @@ async def main(
 
     # Create tasks for all questions
     question_coroutines = [
-        process_question(concurrency_limiter, agent_config, runner_config, question_row, results_queue, run_timestamp, retrieval_model_name)
+        process_question(
+            concurrency_limiter,
+            agent_config,
+            session_config,
+            question_row,
+            results_queue,
+            run_timestamp,
+            retrieval_model_name,
+        )
         for _, question_row in df_questions.iterrows()
     ]
 
@@ -200,4 +215,10 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    asyncio.run(main(max_concurrent=args.concurrency, max_tasks=args.max_tasks, config_path=args.config))
+    asyncio.run(
+        main(
+            max_concurrent=args.concurrency,
+            max_tasks=args.max_tasks,
+            config_path=args.config,
+        )
+    )

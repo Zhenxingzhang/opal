@@ -3,12 +3,10 @@ Agent interface for agentic design.
 
 The Agent class defines the interface for agents that act as policy objects.
 Each agent provides hooks for building messages, recording tool cycles, and
-pre-loop setup. The execution loop itself lives in the Runner.
+pre-loop setup. The execution loop itself lives in the SessionRunner.
 """
 
-import json
 import logging
-import uuid
 from pathlib import Path
 
 from opal.agentic.llm_model import (
@@ -18,7 +16,7 @@ from opal.agentic.llm_model import (
     AnthropicModel,
 )
 from opal.environment.tool import Tool
-from opal.environment.session import Session
+from opal.session.session import SessionState
 from opal.environment.step import Step
 
 
@@ -75,13 +73,12 @@ class Agent:
 
     Agents are pure policy objects — they decide what to say/do given the
     current session state but never execute tools or own the loop.  The
-    Runner owns the execution loop and mediates between Agent and
+    SessionRunner owns the execution loop and mediates between Agent and
     ToolEnvironment.
 
     Subclasses customise behaviour by overriding:
     - ``build_messages``   — how the message list is constructed
     - ``record_tool_cycle`` — how a tool call + observation is recorded
-    - ``pre_loop``          — one-time setup before the loop starts
     """
 
     system_prompt_name = ""
@@ -91,7 +88,7 @@ class Agent:
     verbose: bool = True
 
     def _init_common(self, config) -> None:
-        """Shared initialisation for all agent subclasses."""
+        """Shared initialization for all agent subclasses."""
         self.system_prompt_name = config.get_system_prompt_name()
         self.system_prompt = load_prompt(self.system_prompt_name)
         self.model = build_model(
@@ -105,7 +102,7 @@ class Agent:
     # Policy hooks (overridable)
     # ------------------------------------------------------------------
 
-    def build_messages(self, session: Session) -> list[dict]:
+    def build_messages(self, session: SessionState) -> list[dict]:
         """Build the message list for the LLM API call."""
         return session.build_messages(self.system_prompt)
 
@@ -113,7 +110,7 @@ class Agent:
         self,
         response: ModelResponse,
         observation: str,
-        session: Session,
+        session: SessionState,
         step_idx: int,
     ) -> None:
         """Record a tool call and its observation in the session trajectory."""
@@ -145,65 +142,26 @@ class Agent:
                 f"  Obs:  {observation[:200]}{'...' if len(observation) > 200 else ''}"
             )
 
-    def pre_loop(self, session: Session, env) -> None:
-        """Called once before the execution loop starts.
-
-        Override to inject retrieval steps or other setup.  Receives the
-        ToolEnvironment so subclasses can call ``env.execute_tool()`` for
-        programmatic tool use without owning the environment.
-        """
-
-    # ------------------------------------------------------------------
-    # Finish helpers (used by Runner)
-    # ------------------------------------------------------------------
-
-    def finish(
-        self, response: ModelResponse, session: Session, step_idx: int
-    ) -> str:
-        """Record the final answer and return it."""
-        answer = response.content or ""
-        session.add_step(Step(role="assistant", content=answer))
-        session.metadata["steps"] = step_idx + 1
-        session.metadata["status"] = "success"
-        self._log_answer(answer)
-        return answer
-
-    def max_steps_exceeded(self, session: Session, max_steps: int) -> str:
-        """Handle the case where the agent exhausted its step budget."""
-        session.metadata["steps"] = max_steps
-        session.metadata["status"] = "max_steps_exceeded"
-        last = (
-            session.trajectory[-1].content or session.trajectory[-1].tool_result or ""
-        )
-        if self.verbose:
-            print(f"[Max steps reached] Last output: {last[:200]}")
-        return last
-
     # ------------------------------------------------------------------
     # LLM interaction (not overridden by subclasses)
     # ------------------------------------------------------------------
 
-    def act(self, messages: list[dict], session: Session) -> ModelResponse:
+    def act(
+        self, messages: list[dict], call_number: int | None = None
+    ) -> ModelResponse:
         """Call the LLM with the message history and return the response."""
-        if self.model._session_id != session.id:
-            self.model._session_id = session.id
-        call_number = session.increment_call_counter()
         return self.model.call(
             messages, self.tools if self.tools else None, call_number
         )
 
-    async def act_async(self, messages: list[dict], session: Session) -> ModelResponse:
+    async def act_async(
+        self, messages: list[dict], call_number: int | None = None
+    ) -> ModelResponse:
         """Async version of act()."""
-        if self.model._session_id != session.id:
-            self.model._session_id = session.id
-        call_number = session.increment_call_counter()
         return await self.model.call_async(
             messages, self.tools if self.tools else None, call_number
         )
 
-    def _log_answer(self, answer: str) -> None:
-        if self.verbose:
-            print(f"[Answer] {answer[:500]}{'...' if len(answer) > 500 else ''}")
 
 
 class DefaultAgent(Agent):
@@ -220,7 +178,7 @@ class DefaultAgent(Agent):
 class ReActAgent(Agent):
     """A ReAct-style agent that uses reasoning and acting.
 
-    Loop (driven by Runner):
+    Loop (driven by SessionRunner):
     1. Call LLM with message history
     2. If tool call -> execute tool, add observation, continue
     3. If plain text -> return as final answer
@@ -256,7 +214,7 @@ class AdvancedReActAgent(Agent):
         self._init_common(config)
         self.tools = config.tools or []
 
-    def build_messages(self, session: Session) -> list[dict]:
+    def build_messages(self, session: SessionState) -> list[dict]:
         """Build LLM messages, merging consecutive Thought+Action step pairs.
 
         The trajectory stores Thought and Action as two separate ``assistant``
@@ -315,7 +273,7 @@ class AdvancedReActAgent(Agent):
         self,
         response: ModelResponse,
         observation: str,
-        session: Session,
+        session: SessionState,
         step_idx: int,
     ) -> None:
         """Split one LLM response into three separate trajectory steps."""
@@ -351,60 +309,3 @@ class AdvancedReActAgent(Agent):
             )
 
 
-class RAGAgent(Agent):
-    """Retrieval-Augmented Generation agent.
-
-    Before calling the LLM, this agent programmatically runs a semantic search
-    over its indexed documents using the ``search_pdf`` tool via ToolEnvironment.
-    The retrieval results are injected into the session as a tool-call step so
-    that the LLM sees them as context.  Then a single LLM call produces the
-    final answer.
-
-    Overrides ``pre_loop`` to perform the retrieval injection.
-    """
-
-    def __init__(
-        self,
-        config,
-        **kwargs,
-    ):
-        self._init_common(config)
-        from opal.environment.tool_environment import SEARCH_PDF_TOOL
-
-        self.tools = [SEARCH_PDF_TOOL]
-        self.retriever_top_k = getattr(config, "retriever_top_k", 5)
-
-    def pre_loop(self, session: Session, env) -> None:
-        """Inject semantic search results before the LLM call."""
-        if env.retriever and env.retriever.document_count > 0:
-            query = session.trajectory[0].content  # user query from first step
-            arguments_json = json.dumps(
-                {"query": query, "top_k": self.retriever_top_k}
-            )
-            tool_call_id = f"retrieval_{uuid.uuid4().hex[:8]}"
-            tool_call_record = {
-                "id": tool_call_id,
-                "name": "search_pdf",
-                "arguments": arguments_json,
-            }
-
-            session.add_step(
-                Step(
-                    role="assistant",
-                    content="Searching indexed documents for relevant context.",
-                    tool_call=tool_call_record,
-                )
-            )
-
-            retrieval_text = env.execute_tool("search_pdf", arguments_json)
-
-            session.add_step(
-                Step(
-                    role="tool",
-                    tool_call=tool_call_record,
-                    tool_result=retrieval_text,
-                )
-            )
-
-            if self.verbose:
-                print(f"[RAG] search_pdf returned {len(retrieval_text)} chars")

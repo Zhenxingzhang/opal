@@ -1,4 +1,4 @@
-"""Session manages the conversation state for an agent."""
+"""SessionState manages the conversation state for an agent."""
 
 import uuid
 from dataclasses import dataclass, field
@@ -8,7 +8,7 @@ from opal.environment.step import Step
 
 
 @dataclass
-class Session:
+class SessionState:
     """Manages the state of a conversation/trajectory."""
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))

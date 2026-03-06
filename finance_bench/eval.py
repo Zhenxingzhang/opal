@@ -176,8 +176,11 @@ Set "verdict" to one of: "correct", "incorrect", or "no_answer". Provide a brief
 
 
 async def judge_benchmark_results(
-    benchmark_results, model="gpt-4o-2024-11-20", concurrency=MAX_CONCURRENCY,
-    gold_answer_col="gold_answer", model_answer_col="model_answer",
+    benchmark_results,
+    model="gpt-4o-2024-11-20",
+    concurrency=MAX_CONCURRENCY,
+    gold_answer_col="gold_answer",
+    model_answer_col="model_answer",
 ):
     semaphore = asyncio.Semaphore(concurrency)
     tasks = []
@@ -195,8 +198,11 @@ async def judge_benchmark_results(
 
 
 def judge_benchmark_results_from_file(
-    json_file_path, model="gpt-4o-2024-11-20", concurrency=MAX_CONCURRENCY,
-    gold_answer_col="gold_answer", model_answer_col="model_answer",
+    json_file_path,
+    model="gpt-4o-2024-11-20",
+    concurrency=MAX_CONCURRENCY,
+    gold_answer_col="gold_answer",
+    model_answer_col="model_answer",
 ):
     with open(json_file_path, "r") as f:
         if json_file_path.endswith(".jsonl"):
@@ -205,12 +211,19 @@ def judge_benchmark_results_from_file(
             benchmark_results = json.load(f)
     results = asyncio.run(
         judge_benchmark_results(
-            benchmark_results, model=model, concurrency=concurrency,
-            gold_answer_col=gold_answer_col, model_answer_col=model_answer_col,
+            benchmark_results,
+            model=model,
+            concurrency=concurrency,
+            gold_answer_col=gold_answer_col,
+            model_answer_col=model_answer_col,
         )
     )
-    incorrect_indexes = [i for i, result in enumerate(results) if result["verdict"] == "incorrect"]
-    no_answer_indexes = [i for i, result in enumerate(results) if result["verdict"] == "no_answer"]
+    incorrect_indexes = [
+        i for i, result in enumerate(results) if result["verdict"] == "incorrect"
+    ]
+    no_answer_indexes = [
+        i for i, result in enumerate(results) if result["verdict"] == "no_answer"
+    ]
     print(f"Incorrect indexes: {incorrect_indexes}")
     print(f"No-answer indexes: {no_answer_indexes}")
     return results, benchmark_results
@@ -231,8 +244,11 @@ def judge_benchmark_results_from_file_hybrid(
     for model in models:
         print(f"\nJudging results using model '{model}'...")
         results, benchmark_results = judge_benchmark_results_from_file(
-            json_file_path, model=model, concurrency=concurrency,
-            gold_answer_col=gold_answer_col, model_answer_col=model_answer_col,
+            json_file_path,
+            model=model,
+            concurrency=concurrency,
+            gold_answer_col=gold_answer_col,
+            model_answer_col=model_answer_col,
         )
         hybrid_results[model] = results
         if all_benchmark_results is None:
@@ -241,8 +257,12 @@ def judge_benchmark_results_from_file_hybrid(
     combined_results = []
     for i in range(len(hybrid_results[models[0]])):
         # OR logic: correct if any judge says correct
-        any_correct = any(hybrid_results[model][i]["verdict"] == "correct" for model in models)
-        any_no_answer = all(hybrid_results[model][i]["verdict"] == "no_answer" for model in models)
+        any_correct = any(
+            hybrid_results[model][i]["verdict"] == "correct" for model in models
+        )
+        any_no_answer = all(
+            hybrid_results[model][i]["verdict"] == "no_answer" for model in models
+        )
         # Collect reasoning from all models
         reasoning_parts = []
         for model in models:
@@ -254,10 +274,12 @@ def judge_benchmark_results_from_file_hybrid(
             verdict = "no_answer"
         else:
             verdict = "incorrect"
-        combined_results.append({
-            "verdict": verdict,
-            "reasoning": " | ".join(reasoning_parts),
-        })
+        combined_results.append(
+            {
+                "verdict": verdict,
+                "reasoning": " | ".join(reasoning_parts),
+            }
+        )
 
     return combined_results, all_benchmark_results
 
@@ -387,18 +409,26 @@ if __name__ == "__main__":
 
     if args.hybrid:
         results, benchmark_results = judge_benchmark_results_from_file_hybrid(
-            args.file, models=args.hybrid, concurrency=args.concurrency,
-            gold_answer_col=args.gold_answer_col, model_answer_col=args.model_answer_col,
+            args.file,
+            models=args.hybrid,
+            concurrency=args.concurrency,
+            gold_answer_col=args.gold_answer_col,
+            model_answer_col=args.model_answer_col,
         )
         judge_model_label = "+".join(args.hybrid)
     else:
         results, benchmark_results = judge_benchmark_results_from_file(
-            args.file, model=args.model, concurrency=args.concurrency,
-            gold_answer_col=args.gold_answer_col, model_answer_col=args.model_answer_col,
+            args.file,
+            model=args.model,
+            concurrency=args.concurrency,
+            gold_answer_col=args.gold_answer_col,
+            model_answer_col=args.model_answer_col,
         )
         judge_model_label = args.model
 
     accuracy = calculate_accuracy(results)
-    print(f"input: {args.file}, correct: {accuracy['correct']:.2%}, incorrect: {accuracy['incorrect']:.2%}, no_answer: {accuracy['no_answer']:.2%}")
+    print(
+        f"input: {args.file}, correct: {accuracy['correct']:.2%}, incorrect: {accuracy['incorrect']:.2%}, no_answer: {accuracy['no_answer']:.2%}"
+    )
 
     save_judged_results(benchmark_results, results, judge_model_label, output_path)

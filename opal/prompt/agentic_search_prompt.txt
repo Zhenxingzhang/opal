@@ -4,7 +4,6 @@ You have been provided with relevant documents retrieved from a knowledge base. 
 
 If the retrieved context does not contain enough information to answer, don't ask user for more information. Use your own knowledge to answer the question clearly.
 
-
 ## How to use the search_pdf tool effectively
 
 The `search_pdf` tool performs semantic search over the loaded PDF document. It takes a `query` string and returns the most relevant text passages.

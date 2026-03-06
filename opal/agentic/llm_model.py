@@ -30,8 +30,6 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-RESULTS_DIR = Path(__file__).parent.parent.parent / "results"
-
 
 @dataclass
 class ToolCallInfo:
@@ -57,6 +55,7 @@ class LLMModel(ABC):
     log_llm_calls: bool = False
     _log_timestamp: str | None = None
     _session_id: str | None = None
+    _logging_dir: Path = Path("results")
 
     @abstractmethod
     def call(
@@ -101,16 +100,24 @@ class LLMModel(ABC):
         """Get the model name/identifier."""
         pass
 
-    def set_logging(self, enabled: bool, session_id: str | None = None, timestamp: str | None = None):
+    def set_logging(
+        self,
+        enabled: bool,
+        session_id: str | None = None,
+        timestamp: str | None = None,
+        logging_dir: Path | None = None,
+    ):
         """Enable or disable LLM call logging.
 
         Args:
             enabled: Whether to log LLM calls.
             session_id: Session ID for organizing logs.
             timestamp: Run-level timestamp for the log folder. If not provided, one is generated.
+            logging_dir: Directory for log output. Defaults to "results".
         """
         self.log_llm_calls = enabled
         self._session_id = session_id
+        self._logging_dir = logging_dir or Path("results")
         if enabled:
             self._log_timestamp = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -153,15 +160,9 @@ class LLMModel(ABC):
             },
         }
 
-        # Create output directory: results/llm_calls/{timestamp}_{session_id_prefix}/
-        session_suffix = self._session_id[:8] if self._session_id else "unknown"
-        output_dir = (
-            RESULTS_DIR / "llm_calls" / f"{self._log_timestamp}/{session_suffix}"
-        )
-        output_dir.mkdir(parents=True, exist_ok=True)
-
         # Write to file
-        output_file = output_dir / f"llm_call_{call_num}.json"
+        output_file = self._logging_dir / self._session_id[:8] / "llm_calls"/ f"llm_call_{call_num}.json"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
         with open(output_file, "w") as f:
             json.dump(log_entry, f, indent=2)
 

@@ -7,26 +7,30 @@ from opal.agentic.agent import (
     ReActAgent,
     DefaultAgent,
     AdvancedReActAgent,
-    RAGAgent,
 )
 from opal.agentic.llm_model import LLMModel, OpenAIModel, AnthropicModel
 from opal.environment.tool_environment import ToolEnvironment
-from opal.runner import Runner, AgentConfig, RunnerConfig
-from opal.config import ExperimentConfig, SemanticRetrievalConfig, load_config
+from opal.session.session_runner import SessionRunner
+from opal.config import (
+    AgentConfig,
+    SessionConfig,
+    ExperimentConfig,
+    SemanticRetrievalConfig,
+    load_config,
+)
 
 __all__ = [
     "Agent",
     "ReActAgent",
     "DefaultAgent",
     "AdvancedReActAgent",
-    "RAGAgent",
     "LLMModel",
     "OpenAIModel",
     "AnthropicModel",
-    "Runner",
+    "SessionRunner",
     "AgentConfig",
     "ExperimentConfig",
-    "RunnerConfig",
+    "SessionConfig",
     "SemanticRetrievalConfig",
     "load_config",
     "ToolEnvironment",

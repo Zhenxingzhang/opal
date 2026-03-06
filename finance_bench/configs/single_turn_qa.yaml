@@ -1,10 +1,10 @@
 name: simple-qa
+parallelism: 10
+
+session_runner:
+  max_steps: 10
 
 agent:
   model_name: gpt-4o-2024-11-20
   agent_name: default
   log_llm_calls: true
-
-runner:
-  max_steps: 10
-  parallelism: 1

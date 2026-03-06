@@ -3,7 +3,8 @@
 import argparse
 import asyncio
 
-from opal.runner import Runner, AgentConfig, RunnerConfig
+from opal.session.session_runner import SessionRunner
+from opal.config import AgentConfig, SessionConfig
 from opal.environment.tool_environment import (
     CALCULATOR_TOOL,
     SEARCH_WEB_TOOL,
@@ -22,7 +23,9 @@ async def main():
         log_llm_calls=True,
         tools=[CALCULATOR_TOOL, SEARCH_WEB_TOOL, READ_PDF_TOOL],
     )
-    runner = Runner(config=config, runner_config=RunnerConfig(max_steps=10))
+    runner = SessionRunner(
+        agent_config=config, session_config=SessionConfig(max_steps=10)
+    )
     answer = await runner.run_async(args.query)
 
     print("\n\nFinal answer:", answer)

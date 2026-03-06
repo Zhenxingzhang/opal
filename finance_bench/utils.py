@@ -95,7 +95,9 @@ def build_retriever(
         logger.info("  -> %d chunks", len(chunks))
         all_chunks.extend(chunks)
 
-    logger.info("Indexing %d total chunks from %d documents", len(all_chunks), len(docs))
+    logger.info(
+        "Indexing %d total chunks from %d documents", len(all_chunks), len(docs)
+    )
     retriever = SemanticRetriever(model_name=model_name)
     retriever.index(all_chunks, num_docs=len(docs))
     return retriever

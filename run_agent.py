@@ -1,8 +1,11 @@
 """Quick demo script for the agent environment."""
 
 import argparse
+from datetime import datetime
+from pathlib import Path
 
-from opal.runner import Runner, AgentConfig, RunnerConfig
+from opal.session.session_runner import SessionRunner
+from opal.config import AgentConfig, SessionConfig, ExperimentConfig
 from opal.environment.tool_environment import (
     CALCULATOR_TOOL,
     SEARCH_WEB_TOOL,
@@ -13,28 +16,39 @@ from opal.environment.tool_environment import (
 def main():
     parser = argparse.ArgumentParser(description="Run an LLM agent.")
     parser.add_argument("--config", type=str, help="Path to a YAML config file.")
-    parser.add_argument("query", type=str, help="User query to send to the agent.")
+    parser.add_argument("--query", type=str, help="User query to send to the agent.", default="what is 2+2?")
     args = parser.parse_args()
+
+
+    run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     if args.config:
         from opal.config import load_config
 
         experiment = load_config(args.config)
-        config = experiment.agent
-        runner_config = experiment.runner
+        agent_config = experiment.agent_config
+        session_config = experiment.session_config
         print(f"Experiment: {experiment.name}")
-        print(f"Runner: max_steps={runner_config.max_steps}, parallelism={runner_config.parallelism}")
-        print(f"Semantic retrieval: top_k={experiment.semantic_retrieval.top_k}, model={experiment.semantic_retrieval.model_name}")
+        print(
+            f"Runner: max_steps={session_config.max_steps}, parallelism={experiment.parallelism}"
+        )
+        print(
+            f"Semantic retrieval: top_k={experiment.sem_retrieval_config.top_k}, model={experiment.sem_retrieval_config.model_name}"
+        )
     else:
-        config = AgentConfig(
+        session_config = SessionConfig(max_steps=10, logging_dir=Path(f"results/default_{run_timestamp}"))
+
+        agent_config = AgentConfig(
             model_name="gpt-4o-2024-11-20",
-            agent_name="react",
+            agent_name="default",
             log_llm_calls=True,
             tools=[CALCULATOR_TOOL, SEARCH_WEB_TOOL, READ_PDF_TOOL],
         )
-        runner_config = RunnerConfig(max_steps=10)
 
-    runner = Runner(config=config, runner_config=runner_config)
+    runner = SessionRunner(
+        session_config=session_config,
+        agent_config=agent_config
+    )
     answer = runner.run(args.query)
 
     print("\n\nFinal answer:", answer)

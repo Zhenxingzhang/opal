@@ -1,6 +1,5 @@
 """Environment module exports."""
 
-from opal.environment.session import Session as Session
 from opal.environment.step import Step as Step
 from opal.environment.tool_environment import (
     ToolEnvironment as ToolEnvironment,

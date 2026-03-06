@@ -1,17 +1,23 @@
-"""YAML config file support for experiment configuration.
+"""Configuration dataclasses and YAML config file support.
 
-The config is organized into sections:
-- name: experiment name
-- agent: agent configuration (model, agent type, tools, etc.)
-- runner: execution settings (max_steps, parallelism)
-- semantic_retrieval: retrieval settings (top_k, ranking model)
+Config classes:
+- SessionConfig: execution settings (max_steps, logging)
+- AgentConfig: agent policy configuration (model, agent type, tools, etc.)
+- SemanticRetrievalConfig: retrieval settings (top_k, ranking model)
+- ExperimentConfig: top-level experiment configuration combining the above
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 import yaml
 
+from opal.agentic.agent import (
+    DefaultAgent,
+    ReActAgent,
+    AdvancedReActAgent,
+)
 from opal.environment.tool import Tool
 from opal.environment.tool_environment import (
     CALCULATOR_TOOL,
@@ -19,7 +25,14 @@ from opal.environment.tool_environment import (
     READ_PDF_TOOL,
     SEARCH_WEB_TOOL,
 )
-from opal.runner import AgentConfig, RunnerConfig
+
+
+# Maps agent_name to (AgentClass, prompt_file_name)
+AGENT_REGISTRY = {
+    "default": (DefaultAgent, "default_prompt"),
+    "react": (ReActAgent, "react_prompt"),
+    "advanced_react": (AdvancedReActAgent, "advanced_react_prompt"),
+}
 
 TOOL_REGISTRY: dict[str, Tool] = {
     "calculator": CALCULATOR_TOOL,
@@ -27,6 +40,40 @@ TOOL_REGISTRY: dict[str, Tool] = {
     "read_pdf": READ_PDF_TOOL,
     "search_web": SEARCH_WEB_TOOL,
 }
+
+
+@dataclass
+class SessionConfig:
+    """Configuration for the session execution loop."""
+
+    max_steps: int = 10
+    logging_dir: Path = field(default_factory=lambda: Path("results"))
+    enable_search: bool = False
+
+
+@dataclass
+class AgentConfig:
+    """Configuration for Agent policy."""
+
+    model_name: str = "gpt-4o-2024-11-20"
+    agent_name: str = "react"  # "react" or "default" - determines agent type and prompt
+    temperature: float = 0.0
+    log_llm_calls: bool = False
+    tools: list[Tool] = field(default_factory=list)
+    system_prompt_name: str | None = None  # Optional custom prompt name
+    verbose: bool = True
+    retriever_top_k: int = 5  # Number of chunks for RAGAgent retrieval
+
+    def get_system_prompt_name(self) -> str:
+        """Get the prompt name for this agent.
+
+        If system_prompt_name is set, use it. Otherwise, use the default for the agent type.
+        """
+        if self.system_prompt_name:
+            return self.system_prompt_name
+        if self.agent_name in AGENT_REGISTRY:
+            return AGENT_REGISTRY[self.agent_name][1]
+        return "default_prompt"
 
 
 @dataclass
@@ -44,14 +91,15 @@ class ExperimentConfig:
     Sections:
         name: Human-readable experiment name for tracking.
         agent: Agent configuration (model, agent type, tools, etc.).
-        runner: Execution settings (max_steps, parallelism).
+        runner: Execution settings (max_steps).
         semantic_retrieval: Retrieval settings (top_k, ranking model).
     """
 
     name: str = "default"
-    agent: AgentConfig = field(default_factory=AgentConfig)
-    runner: RunnerConfig = field(default_factory=RunnerConfig)
-    semantic_retrieval: SemanticRetrievalConfig = field(
+    parallelism: int = 1
+    agent_config: AgentConfig = field(default_factory=AgentConfig)
+    session_config: SessionConfig = field(default_factory=SessionConfig)
+    sem_retrieval_config: SemanticRetrievalConfig = field(
         default_factory=SemanticRetrievalConfig
     )
 
@@ -75,6 +123,10 @@ def load_config(path: str | Path) -> ExperimentConfig:
     Expected YAML structure::
 
         name: my-experiment
+        parallelism: 10
+
+        session_runner:
+          max_steps: 10
 
         agent:
           model_name: gpt-4o-2024-11-20
@@ -85,10 +137,6 @@ def load_config(path: str | Path) -> ExperimentConfig:
           tools:
             - calculator
             - search_web
-
-        runner:
-          max_steps: 10
-          parallelism: 10
 
         semantic_retrieval:
           top_k: 5
@@ -109,16 +157,24 @@ def load_config(path: str | Path) -> ExperimentConfig:
         data = yaml.safe_load(f)
 
     if not isinstance(data, dict):
-        raise ValueError(f"Expected a YAML mapping in {path}, got {type(data).__name__}")
+        raise ValueError(
+            f"Expected a YAML mapping in {path}, got {type(data).__name__}"
+        )
 
     # Parse experiment name
     name = data.get("name", "default")
 
-    # Parse runner section — support legacy 'max_turns' key
-    runner_data = data.get("runner", {})
+    # Parse session_runner section — support legacy 'max_turns' and 'runner' keys
+    runner_data = data.get("session_runner", data.get("runner", {}))
     if "max_turns" in runner_data and "max_steps" not in runner_data:
         runner_data["max_steps"] = runner_data.pop("max_turns")
-    runner_config = RunnerConfig(**runner_data)
+    parallelism = data.get("parallelism", runner_data.pop("parallelism", 1))
+    session_config = SessionConfig(**runner_data)
+
+    # Default logging_dir to <experiment_name>/<timestamp> if not explicitly set
+    if "logging_dir" not in runner_data:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_config.logging_dir = Path(f"results/{name}_{timestamp}")
 
     # Parse semantic_retrieval section (before agent, since agent bridges top_k)
     retrieval_data = data.get("semantic_retrieval", {})
@@ -134,7 +190,8 @@ def load_config(path: str | Path) -> ExperimentConfig:
 
     return ExperimentConfig(
         name=name,
-        agent=agent_config,
-        runner=runner_config,
-        semantic_retrieval=retrieval_config,
+        parallelism=parallelism,
+        agent_config=agent_config,
+        session_config=session_config,
+        sem_retrieval_config=retrieval_config,
     )

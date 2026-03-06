@@ -256,7 +256,9 @@ class SemanticRetriever:
 
             return cached_docs, embeddings
         except Exception:
-            logger.warning("Failed to load cache from %s, re-indexing", cache_path, exc_info=True)
+            logger.warning(
+                "Failed to load cache from %s, re-indexing", cache_path, exc_info=True
+            )
             return None
 
     # ------------------------------------------------------------------

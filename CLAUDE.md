@@ -9,7 +9,7 @@ LLM agents framework (Opal) for agent reinforcement learning research. Provides 
 Three-layer design:
 - **Agentic** (`opal/agentic/`): LLM model abstractions (OpenAI, Anthropic), agent implementations (DefaultAgent, ReActAgent), tool definitions
 - **Environment** (`opal/environment/`): Session state, step/trajectory tracking
-- **Orchestration** (`opal/runner.py`): Runner coordinates agent execution via AgentConfig
+- **Orchestration** (`opal/runner.py`): SessionRunner coordinates agent execution via AgentConfig
 
 Key entry points:
 - `run_agent.py` / `run_agent_async.py` — demo scripts
