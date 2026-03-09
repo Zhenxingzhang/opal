@@ -1,10 +1,11 @@
-name: simple-qa
+name: single-turn-qa
 parallelism: 10
 
 session_runner:
   max_steps: 10
+  enable_logging: true
 
 agent:
-  model_name: gpt-4o-2024-11-20
+  model_name: gpt-5
   agent_name: default
-  log_llm_calls: true
+  temperature: 1

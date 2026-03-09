@@ -16,6 +16,7 @@ from typing import Any
 from opal.config import AgentConfig, SessionConfig, AGENT_REGISTRY, TOOL_REGISTRY
 from opal.environment.step import Step
 from opal.environment.tool_environment import ToolEnvironment
+from opal.session.logger import SessionLogger
 from opal.session.session import SessionState
 from opal.agentic.agent import Agent
 from opal.agentic.llm_model import ModelResponse
@@ -36,14 +37,10 @@ class SessionRunner:
         self,
         session_config: SessionConfig,
         agent_config: AgentConfig,
-        env: ToolEnvironment| None = None,
-        session_timestamp: str | None = None,
+        env: ToolEnvironment | None = None,
     ):
         self.session_config = session_config
         self.agent_config = agent_config
-        self.session_timestamp = session_timestamp or datetime.now().strftime(
-            "%Y%m%d_%H%M%S"
-        )
         self.env = env
         self.agent = self._build_agent()
         self.session_state = SessionState()
@@ -77,12 +74,6 @@ class SessionRunner:
     # Finish helpers
     # ------------------------------------------------------------------
 
-    def _prepare_call(self, session: SessionState) -> int:
-        """Sync model session-id and increment call counter before an LLM call."""
-        if self.agent.model._session_id != session.id:
-            self.agent.model._session_id = session.id
-        return session.increment_call_counter()
-
     def _finish(
         self, response: ModelResponse, session: SessionState, step_idx: int
     ) -> str:
@@ -105,8 +96,6 @@ class SessionRunner:
         if self.agent.verbose:
             print(f"[Max steps reached] Last output: {last[:200]}")
         return last
-
-
 
     # ------------------------------------------------------------------
     # Search injection
@@ -142,8 +131,8 @@ class SessionRunner:
     # Canonical execution loop
     # ------------------------------------------------------------------
 
-    def _execute_loop(self, user_query: str) -> str:
-        """Run the canonical agent loop (sync)."""
+    async def _execute_loop(self, user_query: str) -> str:
+        """Run the canonical agent loop."""
         session = self.session_state
         max_steps = self.session_config.max_steps
         session.add_step(Step(role="user", content=user_query))
@@ -152,31 +141,9 @@ class SessionRunner:
 
         for step_idx in range(max_steps):
             messages = self.agent.build_messages(session)
-            call_number = self._prepare_call(session)
-            response = self.agent.act(messages, call_number)
-
-            if response.tool_calls:
-                tc = response.tool_calls[0]
-                observation = self.env.execute_tool(tc.name, tc.arguments)
-                self.agent.record_tool_cycle(response, observation, session, step_idx)
-                continue
-
-            return self._finish(response, session, step_idx)
-
-        return self._max_steps_exceeded(session, max_steps)
-
-    async def _execute_loop_async(self, user_query: str) -> str:
-        """Run the canonical agent loop (async)."""
-        session = self.session_state
-        max_steps = self.session_config.max_steps
-        session.add_step(Step(role="user", content=user_query))
-        if self.session_config.enable_search:
-            self._inject_search(user_query)
-
-        for step_idx in range(max_steps):
-            messages = self.agent.build_messages(session)
-            call_number = self._prepare_call(session)
-            response = await self.agent.act_async(messages, call_number)
+            call_number = len(session.llm_calls) + 1
+            response, metrics = await self.agent.act(messages, call_number)
+            session.llm_calls.append(metrics)
 
             if response.tool_calls:
                 tc = response.tool_calls[0]
@@ -196,10 +163,10 @@ class SessionRunner:
         """Clear session for a fresh run."""
         self.session_state.reset()
 
-    def run(self, user_query: str) -> str:
+    async def run(self, user_query: str) -> str:
         """
         Run the agent on a user query. Returns the final text answer.
-        The full trajectory is stored in self.session.trajectory.
+        The full trajectory is stored in self.session_state.trajectory.
         """
         self.session_state.reset()
         self.session_state.metadata = {
@@ -210,67 +177,18 @@ class SessionRunner:
             "retriever": self.env.retriever.summary() if self.env.retriever else None,
         }
 
-        if self.agent_config.log_llm_calls:
-            self.agent.model.set_logging(
-                True,
-                session_id=self.session_state.id,
-                timestamp=self.session_timestamp,
-                logging_dir=self.session_config.logging_dir,
+        session_logger: SessionLogger | None = None
+        if self.session_config.enable_logging:
+            session_logger = SessionLogger(
+                self.session_config.logging_dir_root, self.session_state.id
             )
 
-        result = self._execute_loop(user_query)
-        self._log_trajectory()
+        result = await self._execute_loop(user_query)
+
+        if session_logger:
+            session_logger.flush(self.session_state)
+
         return result
-
-    async def run_async(self, user_query: str) -> str:
-        """
-        Async version of run(). Returns the final text answer.
-        The full trajectory is stored in self.session.trajectory.
-        """
-        self.session_state.reset()
-        self.session_state.metadata = {
-            "timestamp": datetime.now().isoformat(),
-            "query": user_query,
-            "agent": self.agent.system_prompt_name,
-            "model": self.agent.model.get_name(),
-            "retriever": self.env.retriever.summary() if self.env.retriever else None,
-        }
-
-        if self.agent_config.log_llm_calls:
-            self.agent.model.set_logging(
-                True,
-                session_id=self.session_state.id,
-                timestamp=self.session_timestamp,
-                logging_dir=self.session_config.logging_dir,
-            )
-
-        result = await self._execute_loop_async(user_query)
-        self._log_trajectory()
-        return result
-
-    def _log_trajectory(self):
-        """Save the full trajectory to a JSON file in the same folder as LLM call logs."""
-        if not self.agent_config.log_llm_calls:
-            return
-
-        session_suffix = self.session_state.id[:8]
-        output_dir = (
-            self.session_config.logging_dir
-            / f"{session_suffix}"
-        )
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        trajectory_data = {
-            "session_id": self.session_state.id,
-            "metadata": self.session_state.metadata,
-            "trajectory": self.session_state.get_trajectory_as_dicts(),
-        }
-
-        output_file = output_dir / f"{session_suffix}_trajectory.json"
-        with open(output_file, "w") as f:
-            json.dump(trajectory_data, f, indent=2)
-
-        logger.info(f"Trajectory logged to {output_file}")
 
     def print_trajectory(self):
         """Pretty-print the trajectory for debugging."""

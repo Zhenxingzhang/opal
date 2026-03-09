@@ -47,8 +47,13 @@ class SessionConfig:
     """Configuration for the session execution loop."""
 
     max_steps: int = 10
-    logging_dir: Path = field(default_factory=lambda: Path("results"))
+    logging_dir_root: Path = field(
+        default_factory=lambda: Path(
+            f"results/demo_run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        )
+    )
     enable_search: bool = False
+    enable_logging: bool = False
 
 
 @dataclass
@@ -58,7 +63,6 @@ class AgentConfig:
     model_name: str = "gpt-4o-2024-11-20"
     agent_name: str = "react"  # "react" or "default" - determines agent type and prompt
     temperature: float = 0.0
-    log_llm_calls: bool = False
     tools: list[Tool] = field(default_factory=list)
     system_prompt_name: str | None = None  # Optional custom prompt name
     verbose: bool = True
@@ -127,13 +131,13 @@ def load_config(path: str | Path) -> ExperimentConfig:
 
         session_runner:
           max_steps: 10
+          enable_logging: true
 
         agent:
           model_name: gpt-4o-2024-11-20
           agent_name: react
           temperature: 0.0
           system_prompt_name: react_prompt
-          log_llm_calls: true
           tools:
             - calculator
             - search_web
@@ -169,12 +173,20 @@ def load_config(path: str | Path) -> ExperimentConfig:
     if "max_turns" in runner_data and "max_steps" not in runner_data:
         runner_data["max_steps"] = runner_data.pop("max_turns")
     parallelism = data.get("parallelism", runner_data.pop("parallelism", 1))
+
+    # Backward compat: accept log_llm_calls from agent section as enable_logging
+    agent_data = data.get("agent", {})
+    if "enable_logging" not in runner_data and agent_data.get("log_llm_calls"):
+        runner_data["enable_logging"] = agent_data.pop("log_llm_calls")
+    else:
+        agent_data.pop("log_llm_calls", None)
+
     session_config = SessionConfig(**runner_data)
 
     # Default logging_dir to <experiment_name>/<timestamp> if not explicitly set
     if "logging_dir" not in runner_data:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        session_config.logging_dir = Path(f"results/{name}_{timestamp}")
+        session_config.logging_dir_root = Path(f"results/{name}_{timestamp}")
 
     # Parse semantic_retrieval section (before agent, since agent bridges top_k)
     retrieval_data = data.get("semantic_retrieval", {})

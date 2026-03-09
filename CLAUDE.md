@@ -9,10 +9,10 @@ LLM agents framework (Opal) for agent reinforcement learning research. Provides 
 Three-layer design:
 - **Agentic** (`opal/agentic/`): LLM model abstractions (OpenAI, Anthropic), agent implementations (DefaultAgent, ReActAgent), tool definitions
 - **Environment** (`opal/environment/`): Session state, step/trajectory tracking
-- **Orchestration** (`opal/runner.py`): SessionRunner coordinates agent execution via AgentConfig
+- **Orchestration** (`opal/session/`): SessionRunner coordinates agent execution; SessionLogger handles file I/O
 
 Key entry points:
-- `run_agent.py` / `run_agent_async.py` — demo scripts
+- `run_agent.py` / `run_agent_async.py` — async demo scripts
 - `finance_bench/run.py` — async benchmark runner
 - `finance_bench/eval.py` — evaluation with response caching
 
@@ -43,7 +43,7 @@ uv run ruff format .
 - Python 3.12+ — use modern type hints (`str | None`, `list[Tool]`)
 - Ruff for linting and formatting
 - Dataclasses for data containers
-- Both sync and async methods where applicable (`run()` / `run_async()`)
+- Async-only API — all LLM calls, agent actions, and runner methods are async
 - No test suite yet — do not assume tests exist
 
 ## Environment Variables
@@ -56,5 +56,5 @@ uv run ruff format .
 
 - `AGENT_REGISTRY` maps agent names (`"default"`, `"react"`) to implementations and prompts
 - Prompts live in `opal/prompt/` as `.txt` files
-- LLM call logs go to `results/llm_calls/` when `log_llm_calls=True`
+- LLM call logs go to `results/<run>/llm_calls/` when `enable_logging=True` in `SessionConfig`
 - Evaluation cache in `.eval_cache/`

@@ -6,11 +6,18 @@ Each agent provides hooks for building messages, recording tool cycles, and
 pre-loop setup. The execution loop itself lives in the SessionRunner.
 """
 
+from __future__ import annotations
+
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from opal.config import AgentConfig
 
 from opal.agentic.llm_model import (
     LLMModel,
+    LLMCallMetrics,
     ModelResponse,
     OpenAIModel,
     AnthropicModel,
@@ -44,28 +51,20 @@ def load_prompt(prompt_name: str) -> str:
     return prompt_path.read_text().strip()
 
 
-def build_model(
-    model_name: str, log_llm_calls: bool = False, temperature: float = 0.0
-) -> LLMModel:
+def build_model(model_name: str, temperature: float = 0.0) -> LLMModel:
     """Build an LLM model based on the model name.
 
     Args:
         model_name: Name of the model (e.g., "gpt-4o", "claude-sonnet-4").
-        log_llm_calls: Whether to enable LLM call logging.
         temperature: Sampling temperature for the model.
 
     Returns:
         An LLMModel instance.
     """
     if model_name.startswith("claude"):
-        model = AnthropicModel(model_name=model_name, temperature=temperature)
+        return AnthropicModel(model_name=model_name, temperature=temperature)
     else:
-        model = OpenAIModel(model_name=model_name, temperature=temperature)
-
-    if log_llm_calls:
-        model.log_llm_calls = True
-
-    return model
+        return OpenAIModel(model_name=model_name, temperature=temperature)
 
 
 class Agent:
@@ -87,13 +86,12 @@ class Agent:
     tools: list[Tool] = []
     verbose: bool = True
 
-    def _init_common(self, config) -> None:
+    def _init_common(self, config: AgentConfig) -> None:
         """Shared initialization for all agent subclasses."""
         self.system_prompt_name = config.get_system_prompt_name()
         self.system_prompt = load_prompt(self.system_prompt_name)
         self.model = build_model(
             config.model_name,
-            getattr(config, "log_llm_calls", False),
             temperature=getattr(config, "temperature", 0.0),
         )
         self.verbose = getattr(config, "verbose", True)
@@ -146,22 +144,13 @@ class Agent:
     # LLM interaction (not overridden by subclasses)
     # ------------------------------------------------------------------
 
-    def act(
-        self, messages: list[dict], call_number: int | None = None
-    ) -> ModelResponse:
+    async def act(
+        self, messages: list[dict], call_number: int = 0
+    ) -> tuple[ModelResponse, LLMCallMetrics]:
         """Call the LLM with the message history and return the response."""
-        return self.model.call(
+        return await self.model.call(
             messages, self.tools if self.tools else None, call_number
         )
-
-    async def act_async(
-        self, messages: list[dict], call_number: int | None = None
-    ) -> ModelResponse:
-        """Async version of act()."""
-        return await self.model.call_async(
-            messages, self.tools if self.tools else None, call_number
-        )
-
 
 
 class DefaultAgent(Agent):
@@ -307,5 +296,3 @@ class AdvancedReActAgent(Agent):
             print(
                 f"[Observation] {observation[:200]}{'...' if len(observation) > 200 else ''}"
             )
-
-

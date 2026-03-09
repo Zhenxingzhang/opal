@@ -43,7 +43,6 @@ async def process_question(
     session_config: SessionConfig,
     question_row: pd.Series,
     results_queue: asyncio.Queue,
-    run_timestamp: str,
     retrieval_model_name: str = "all-MiniLM-L6-v2",
 ):
     """Process a single question with concurrency control."""
@@ -57,13 +56,12 @@ async def process_question(
             session_config=session_config,
             agent_config=agent_config,
             env=tool_env,
-            session_timestamp=run_timestamp,
         )
         question = question_row["question"]
         print(f"Processing: {question_row['financebench_id']} - {question[:50]}...")
 
         try:
-            model_answer = await session_runner.run_async(question)
+            model_answer = await session_runner.run(question)
         except Exception as e:
             print(f"Error processing {question_row['financebench_id']}: {e}")
             model_answer = f"Error: {e}"
@@ -150,7 +148,7 @@ async def main(
         output_folder,
         f"{agent_config.agent_name}_{agent_config.get_system_prompt_name()}_{agent_config.model_name}_{EVAL_MODE}_{run_timestamp}.jsonl",
     )
-    session_config.logging_dir = output_folder
+    session_config.logging_dir_root = output_folder
 
     # Ensure results directory exists
     os.makedirs(output_path.parent, exist_ok=True)
@@ -169,7 +167,6 @@ async def main(
             session_config,
             question_row,
             results_queue,
-            run_timestamp,
             retrieval_model_name,
         )
         for _, question_row in df_questions.iterrows()

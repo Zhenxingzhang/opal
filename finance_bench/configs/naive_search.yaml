@@ -4,9 +4,9 @@ parallelism: 10
 session_runner:
   max_steps: 10
   enable_search: true
+  enable_logging: true
 
 agent:
   model_name: gpt-4o-2024-11-20
   agent_name: default
   system_prompt_name: naive_search_prompt
-  log_llm_calls: true
