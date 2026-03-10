@@ -6,7 +6,6 @@ from opal.agentic.agent import (
     Agent,
     ReActAgent,
     DefaultAgent,
-    AdvancedReActAgent,
 )
 from opal.agentic.llm_model import LLMModel, OpenAIModel, AnthropicModel
 from opal.environment.tool_environment import ToolEnvironment
@@ -23,7 +22,6 @@ __all__ = [
     "Agent",
     "ReActAgent",
     "DefaultAgent",
-    "AdvancedReActAgent",
     "LLMModel",
     "OpenAIModel",
     "AnthropicModel",

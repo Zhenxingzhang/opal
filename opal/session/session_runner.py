@@ -101,7 +101,7 @@ class SessionRunner:
     # Search injection
     # ------------------------------------------------------------------
 
-    def _inject_search(self, user_query: str) -> None:
+    async def _inject_search(self, user_query: str) -> None:
         """Manually call search_pdf with the user query and inject results into the trajectory.
 
         This simulates the agent having called search_pdf itself, so the LLM
@@ -112,7 +112,7 @@ class SessionRunner:
             "name": "search_pdf",
             "arguments": json.dumps({"query": user_query}),
         }
-        observation = self.env.execute_tool(
+        observation = await self.env.execute_tool(
             tool_call_record["name"], tool_call_record["arguments"]
         )
         self.session_state.add_step(
@@ -137,7 +137,7 @@ class SessionRunner:
         max_steps = self.session_config.max_steps
         session.add_step(Step(role="user", content=user_query))
         if self.session_config.enable_search:
-            self._inject_search(user_query)
+            await self._inject_search(user_query)
 
         for step_idx in range(max_steps):
             messages = self.agent.build_messages(session)
@@ -147,7 +147,7 @@ class SessionRunner:
 
             if response.tool_calls:
                 tc = response.tool_calls[0]
-                observation = self.env.execute_tool(tc.name, tc.arguments)
+                observation = await self.env.execute_tool(tc.name, tc.arguments)
                 self.agent.record_tool_cycle(response, observation, session, step_idx)
                 continue
 
@@ -172,7 +172,8 @@ class SessionRunner:
         self.session_state.metadata = {
             "timestamp": datetime.now().isoformat(),
             "query": user_query,
-            "agent": self.agent.system_prompt_name,
+            "agent": self.agent_config.agent_name,
+            "prompt": self.agent.system_prompt_name,
             "model": self.agent.model.get_name(),
             "retriever": self.env.retriever.summary() if self.env.retriever else None,
         }

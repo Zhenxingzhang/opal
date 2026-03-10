@@ -16,7 +16,6 @@ import yaml
 from opal.agentic.agent import (
     DefaultAgent,
     ReActAgent,
-    AdvancedReActAgent,
 )
 from opal.environment.tool import Tool
 from opal.environment.tool_environment import (
@@ -24,6 +23,7 @@ from opal.environment.tool_environment import (
     SEARCH_PDF_TOOL,
     READ_PDF_TOOL,
     SEARCH_WEB_TOOL,
+    THINK_TOOL,
 )
 
 
@@ -31,7 +31,6 @@ from opal.environment.tool_environment import (
 AGENT_REGISTRY = {
     "default": (DefaultAgent, "default_prompt"),
     "react": (ReActAgent, "react_prompt"),
-    "advanced_react": (AdvancedReActAgent, "advanced_react_prompt"),
 }
 
 TOOL_REGISTRY: dict[str, Tool] = {
@@ -39,6 +38,7 @@ TOOL_REGISTRY: dict[str, Tool] = {
     "search_pdf": SEARCH_PDF_TOOL,
     "read_pdf": READ_PDF_TOOL,
     "search_web": SEARCH_WEB_TOOL,
+    "think": THINK_TOOL,
 }
 
 

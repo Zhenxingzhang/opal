@@ -101,8 +101,17 @@ class Agent:
     # ------------------------------------------------------------------
 
     def build_messages(self, session: SessionState) -> list[dict]:
-        """Build the message list for the LLM API call."""
-        return session.build_messages(self.system_prompt)
+        """Build the message list for the LLM API call.
+
+        Default: system prompt + linear replay of trajectory.
+        Subclasses override to customise message construction.
+        """
+        messages: list[dict] = []
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
+        for step in session.trajectory:
+            messages.append(step.to_message())
+        return messages
 
     def record_tool_cycle(
         self,
@@ -154,36 +163,20 @@ class Agent:
 
 
 class DefaultAgent(Agent):
-    """A simple agent that uses the default prompt.
+    """General-purpose agent. Works with or without tools.
 
-    Makes a single LLM call with no tools.  All default hooks work as-is.
+    With no tools configured, makes a single LLM call and returns the response.
+    With tools, the SessionRunner drives a ReAct-style loop using the default
+    ``build_messages`` and ``record_tool_cycle`` hooks.
     """
 
-    def __init__(self, config,):
-        self._init_common(config)
-        self.tools = []
-
-
-class ReActAgent(Agent):
-    """A ReAct-style agent that uses reasoning and acting.
-
-    Loop (driven by SessionRunner):
-    1. Call LLM with message history
-    2. If tool call -> execute tool, add observation, continue
-    3. If plain text -> return as final answer
-    4. Repeat until done or max_steps
-
-    All default hooks (build_messages, record_tool_cycle, finish,
-    max_steps_exceeded) match exactly, so no overrides needed.
-    """
-
-    def __init__(self, config,):
+    def __init__(self, config):
         self._init_common(config)
         self.tools = config.tools or []
 
 
-class AdvancedReActAgent(Agent):
-    """A ReAct-style agent with explicit Thought/Action/Observation separation.
+class ReActAgent(Agent):
+    """ReAct agent with explicit Thought/Action/Observation separation.
 
     Each cycle's response is split into three distinct trajectory steps:
 
@@ -192,14 +185,14 @@ class AdvancedReActAgent(Agent):
         Step(role="tool", tool_call={...}, tool_result="...")     # Observation
 
     This gives a cleaner signal for downstream RL analysis compared to
-    ReActAgent which merges Thought+Action into a single step.
+    DefaultAgent which merges Thought+Action into a single step.
 
     Overrides ``build_messages`` to merge consecutive Thought+Action pairs
     back into one assistant message (APIs reject consecutive assistant
     messages), and ``record_tool_cycle`` for the 3-step split.
     """
 
-    def __init__(self, config,):
+    def __init__(self, config):
         self._init_common(config)
         self.tools = config.tools or []
 
@@ -273,14 +266,20 @@ class AdvancedReActAgent(Agent):
             "arguments": tc.arguments,
         }
 
-        # Step 1 — Thought (pure reasoning, no tool_call)
         thought_text = response.content or ""
-        session.add_step(Step(role="assistant", content=thought_text))
 
-        # Step 2 — Action (pure tool call, no content)
-        session.add_step(
-            Step(role="assistant", content=None, tool_call=tool_call_record)
-        )
+        if thought_text:
+            # Step 1 — Thought (pure reasoning, no tool_call)
+            session.add_step(Step(role="assistant", content=thought_text))
+            # Step 2 — Action (pure tool call, no content)
+            session.add_step(
+                Step(role="assistant", content=None, tool_call=tool_call_record)
+            )
+        else:
+            # No thought — single assistant step with the tool call
+            session.add_step(
+                Step(role="assistant", content=None, tool_call=tool_call_record)
+            )
 
         # Step 3 — Observation (tool result)
         session.add_step(

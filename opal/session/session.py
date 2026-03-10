@@ -28,15 +28,6 @@ class SessionState:
         self.metadata = {}
         self.llm_calls = []
 
-    def build_messages(self, system_prompt: str | None = None) -> list[dict]:
-        """Convert trajectory into LLM API messages, optionally prepending a system prompt."""
-        messages: list[dict] = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        for step in self.trajectory:
-            messages.append(step.to_message())
-        return messages
-
     def get_trajectory_as_dicts(self) -> list[dict]:
         """Return trajectory as a list of serializable dicts (for logging/RL)."""
         return [

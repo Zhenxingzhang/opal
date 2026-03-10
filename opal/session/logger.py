@@ -20,7 +20,7 @@ class SessionLogger:
 
     def __init__(self, output_dir: Path, session_id: str) -> None:
         self._session_id = session_id
-        self._session_dir = output_dir / session_id[:8]
+        self._session_dir = output_dir / "sessions" / session_id[:8]
 
     def flush(self, session_state: SessionState) -> None:
         """Write all LLM call records and the trajectory to disk."""

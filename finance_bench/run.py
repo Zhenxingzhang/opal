@@ -3,6 +3,7 @@ from datetime import datetime
 import json
 import logging
 import os
+import shutil
 from pathlib import Path
 
 import pandas as pd
@@ -146,12 +147,15 @@ async def main(
     output_folder = Path(PATH_RESULTS, f"{experiment_config.name}_{run_timestamp}")
     output_path = Path(
         output_folder,
-        f"{agent_config.agent_name}_{agent_config.get_system_prompt_name()}_{agent_config.model_name}_{EVAL_MODE}_{run_timestamp}.jsonl",
+        "outputs.jsonl"
     )
     session_config.logging_dir_root = output_folder
 
     # Ensure results directory exists
     os.makedirs(output_path.parent, exist_ok=True)
+
+    # Copy config file into the output folder for reproducibility
+    shutil.copy2(config_path, output_folder / "config.yaml")
 
     print(f"Running with max {max_concurrent} concurrent tasks")
 
@@ -207,7 +211,7 @@ if __name__ == "__main__":
         "--max-tasks",
         "-n",
         type=int,
-        default=1,
+        default=150,
         help="Max total tasks to run (default: 1)",
     )
     args = parser.parse_args()

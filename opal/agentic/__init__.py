@@ -4,7 +4,6 @@ from opal.agentic.agent import (
     Agent as Agent,
     ReActAgent as ReActAgent,
     DefaultAgent as DefaultAgent,
-    AdvancedReActAgent as AdvancedReActAgent,
 )
 from opal.agentic.llm_model import (
     LLMModel as LLMModel,

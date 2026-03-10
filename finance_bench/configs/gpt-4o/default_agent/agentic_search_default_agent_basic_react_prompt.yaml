@@ -1,4 +1,4 @@
-name: gpt-4o-single-turn-qa
+name: gpt-4o-agentic-search-default-agent-basic-react-prompt
 parallelism: 10
 
 session_runner:
@@ -8,4 +8,6 @@ session_runner:
 agent:
   model_name: gpt-4o-2024-11-20
   agent_name: default
-  temperature: 0
+  system_prompt_name: react_prompt
+  tools:
+    - search_pdf

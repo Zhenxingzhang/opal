@@ -77,6 +77,13 @@ def _search_pdf(query: str, top_k: int = 5, env=None) -> str:
     return "\n\n".join(output)
 
 
+def _think(thought: str) -> str:
+    """Use this tool to think about something. It will not obtain new information
+    or change any state, but just record the thought. Use it when complex reasoning
+    or synthesis of information is needed before taking an action."""
+    return "Thought recorded."
+
+
 def _search_web(query: str, num_results: int = 5) -> str:
     """Search the web using DuckDuckGo.
 
@@ -171,6 +178,22 @@ READ_PDF_TOOL = Tool(
     function=_read_pdf,
 )
 
+THINK_TOOL = Tool(
+    name="think",
+    description="Use this tool to think about something. It will not obtain new information or change any state, but just record the thought. Use it when complex reasoning or synthesis of information is needed before taking an action.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "thought": {
+                "type": "string",
+                "description": "Your thought or reasoning.",
+            }
+        },
+        "required": ["thought"],
+    },
+    function=_think,
+)
+
 SEARCH_WEB_TOOL = Tool(
     name="search_web",
     description="Search the web for information using DuckDuckGo. Returns titles, URLs, and descriptions of search results.",
@@ -210,11 +233,12 @@ class ToolEnvironment:
     tool_map: dict[str, Tool] = field(default_factory=dict)
     extras: dict[str, Any] = field(default_factory=dict)
 
-    def execute_tool(self, name: str, arguments_json: str) -> str:
+    async def execute_tool(self, name: str, arguments_json: str) -> str:
         """Execute a tool by name with JSON arguments.
 
-        If the tool function accepts an ``env`` parameter the environment
-        is passed through automatically.
+        Supports both sync and async tool functions.  If the tool function
+        accepts an ``env`` parameter the environment is passed through
+        automatically.
 
         Args:
             name: Name of the tool to execute.
@@ -233,6 +257,8 @@ class ToolEnvironment:
             if "env" in sig.parameters:
                 args["env"] = self
             result = tool.function(**args)
+            if inspect.isawaitable(result):
+                result = await result
             return str(result)
         except json.JSONDecodeError as e:
             return f"Error parsing arguments for {name}: {e}"

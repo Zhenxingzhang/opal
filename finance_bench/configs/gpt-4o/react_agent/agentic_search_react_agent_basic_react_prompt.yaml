@@ -1,4 +1,4 @@
-name: gpt-4o-agentic-search
+name: gpt-4o-agentic-search-react-agent-basic-react-prompt
 parallelism: 10
 
 session_runner:
@@ -8,6 +8,6 @@ session_runner:
 agent:
   model_name: gpt-4o-2024-11-20
   agent_name: react
-  system_prompt_name: naive_search_prompt
+  system_prompt_name: react_prompt
   tools:
     - search_pdf
