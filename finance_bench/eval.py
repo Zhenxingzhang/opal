@@ -324,6 +324,44 @@ def save_judged_results(
     print(f"Judged results saved to {output_path}")
 
 
+def write_summary(
+    input_file: str,
+    judge_model: str,
+    accuracy: dict[str, float],
+    results: list[dict],
+    output_path: str,
+):
+    """Write a short summary of the eval results to a text file next to the judged output."""
+    summary_path = Path(output_path).with_suffix(".summary.txt")
+    total = len(results)
+    correct = sum(1 for r in results if r["verdict"] == "correct")
+    incorrect = sum(1 for r in results if r["verdict"] == "incorrect")
+    no_answer = sum(1 for r in results if r["verdict"] == "no_answer")
+
+    lines = [
+        "Eval Summary",
+        "============",
+        f"Input file:    {input_file}",
+        f"Judge model:   {judge_model}",
+        f"Total items:   {total}",
+        "",
+        "Results:",
+        f"  Correct:     {correct}/{total} ({accuracy['correct']:.2%})",
+        f"  Incorrect:   {incorrect}/{total} ({accuracy['incorrect']:.2%})",
+        f"  No answer:   {no_answer}/{total} ({accuracy['no_answer']:.2%})",
+    ]
+
+    incorrect_ids = [i for i, r in enumerate(results) if r["verdict"] == "incorrect"]
+    no_answer_ids = [i for i, r in enumerate(results) if r["verdict"] == "no_answer"]
+    if incorrect_ids:
+        lines += ["", f"Incorrect indexes: {incorrect_ids}"]
+    if no_answer_ids:
+        lines += ["", f"No-answer indexes: {no_answer_ids}"]
+
+    summary_path.write_text("\n".join(lines) + "\n")
+    print(f"Summary written to {summary_path}")
+
+
 def clear_cache():
     """Remove all cached LLM responses."""
     if CACHE_DIR.exists():
@@ -432,3 +470,4 @@ if __name__ == "__main__":
     )
 
     save_judged_results(benchmark_results, results, judge_model_label, output_path)
+    write_summary(args.file, judge_model_label, accuracy, results, output_path)

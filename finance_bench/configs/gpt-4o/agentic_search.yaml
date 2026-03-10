@@ -1,0 +1,13 @@
+name: gpt-4o-agentic-search
+parallelism: 10
+
+session_runner:
+  max_steps: 10
+  enable_logging: true
+
+agent:
+  model_name: gpt-4o-2024-11-20
+  agent_name: react
+  system_prompt_name: naive_search_prompt
+  tools:
+    - search_pdf

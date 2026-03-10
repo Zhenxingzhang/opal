@@ -159,7 +159,7 @@ class DefaultAgent(Agent):
     Makes a single LLM call with no tools.  All default hooks work as-is.
     """
 
-    def __init__(self, config, **kwargs):
+    def __init__(self, config,):
         self._init_common(config)
         self.tools = []
 
@@ -177,7 +177,7 @@ class ReActAgent(Agent):
     max_steps_exceeded) match exactly, so no overrides needed.
     """
 
-    def __init__(self, config, **kwargs):
+    def __init__(self, config,):
         self._init_common(config)
         self.tools = config.tools or []
 
@@ -199,7 +199,7 @@ class AdvancedReActAgent(Agent):
     messages), and ``record_tool_cycle`` for the 3-step split.
     """
 
-    def __init__(self, config, **kwargs):
+    def __init__(self, config,):
         self._init_common(config)
         self.tools = config.tools or []
 
