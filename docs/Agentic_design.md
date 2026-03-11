@@ -44,8 +44,7 @@ The Opal codebase implements a **modular agentic framework** with three main lay
 - Defines the interface for all agents
 - Key methods:
   - `act(messages, call_number)` - Async: call the LLM with message history, returns `(ModelResponse, LLMCallMetrics)`
-  - `build_messages(session)` - Build LLM message list from session trajectory
-  - `record_tool_cycle(response, observation, session, step_idx)` - Record tool call + observation in trajectory
+  - `build_messages(session)` - Build LLM message list from session trajectory (merges Thought+Action pairs for API compatibility)
 
 **Implementations:**
 

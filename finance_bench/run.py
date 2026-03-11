@@ -14,6 +14,7 @@ from opal.environment.tool_environment import ToolEnvironment
 from utils import build_retriever, PATH_ROOT, PATH_FINANCE_BENCH
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 ##############################################################################
 # DATASET CONFIG
@@ -49,9 +50,9 @@ async def process_question(
     """Process a single question with concurrency control."""
     async with concurrency_limiter:
         doc_name = question_row["doc_name"]
-        print(f"doc_name: {doc_name}")
+        logger.debug("doc_name: %s", doc_name)
         retriever = build_retriever(doc_name, model_name=retrieval_model_name)
-        print(f"retriever: {retriever.summary()}")
+        logger.debug("retriever: %s", retriever.summary())
         tool_env = ToolEnvironment(retriever=retriever)
         session_runner = SessionRunner(
             session_config=session_config,
@@ -59,12 +60,14 @@ async def process_question(
             env=tool_env,
         )
         question = question_row["question"]
-        print(f"Processing: {question_row['financebench_id']} - {question[:50]}...")
+        logger.info(
+            "Processing: %s - %s...", question_row["financebench_id"], question[:50]
+        )
 
         try:
             model_answer = await session_runner.run(question)
         except Exception as e:
-            print(f"Error processing {question_row['financebench_id']}: {e}")
+            logger.error("Error processing %s: %s", question_row["financebench_id"], e)
             model_answer = f"Error: {e}"
 
         question_result = {
@@ -82,7 +85,7 @@ async def process_question(
             "total_tool_calls": session_runner.metadata.get("total_tool_calls", 0),
         }
         await results_queue.put(question_result)
-        print(f"Completed: {question_row['financebench_id']}")
+        logger.info("Completed: %s", question_row["financebench_id"])
 
 
 async def write_results(
@@ -96,7 +99,7 @@ async def write_results(
             results_file.write(json.dumps(result) + "\n")
             results_file.flush()
             results_written += 1
-            print(f"Progress: {results_written}/{total_questions}")
+            logger.info("Progress: %d/%d", results_written, total_questions)
 
 
 async def main(
@@ -116,41 +119,38 @@ async def main(
     # Get all docs
     df_questions = df_questions.sort_values("doc_name")
     all_doc_names = df_questions["doc_name"].unique().tolist()
-    print(f"Total number of distinct PDF: {len(all_doc_names)}")
+    logger.info("Total number of distinct PDF: %d", len(all_doc_names))
 
     # Select relevant dataset portion
     if DATASET_PORTION != "ALL":
         df_questions = df_questions.loc[
             df_questions["dataset_subset_label"] == DATASET_PORTION
         ]
-    print(f"Number of questions: {len(df_questions)}")
+    logger.info("Number of questions: %d", len(df_questions))
 
     # Limit number of tasks if specified
     if max_tasks is not None and max_tasks > 0:
         df_questions = df_questions.head(max_tasks)
-        print(f"Limited to {max_tasks} tasks")
+        logger.info("Limited to %d tasks", max_tasks)
 
     # Check relevant documents
     df_questions = df_questions.sort_values("doc_name")
     selected_doc_names = df_questions["doc_name"].unique().tolist()
-    print(f"Number of distinct PDF: {len(selected_doc_names)}")
+    logger.info("Number of distinct PDF: %d", len(selected_doc_names))
 
     experiment_config = load_config(config_path)
     agent_config = experiment_config.agent_config
     session_config = experiment_config.session_config
     max_concurrent = experiment_config.parallelism
     retrieval_model_name = experiment_config.sem_retrieval_config.model_name
-    print(f"Experiment: {experiment_config.name}")
+    logger.info("Experiment: %s", experiment_config.name)
 
     # Shared timestamp for this run
     run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # Output file path
     output_folder = Path(PATH_RESULTS, f"{experiment_config.name}_{run_timestamp}")
-    output_path = Path(
-        output_folder,
-        "outputs.jsonl"
-    )
+    output_path = Path(output_folder, "outputs.jsonl")
     session_config.logging_dir_root = output_folder
 
     # Ensure results directory exists
@@ -159,7 +159,7 @@ async def main(
     # Copy config file into the output folder for reproducibility
     shutil.copy2(config_path, output_folder / "config.yaml")
 
-    print(f"Running with max {max_concurrent} concurrent tasks")
+    logger.info("Running with max %d concurrent tasks", max_concurrent)
 
     # Create semaphore for concurrency control
     concurrency_limiter = asyncio.Semaphore(max_concurrent)
@@ -189,7 +189,7 @@ async def main(
     # Wait for writer to finish
     await writer_task
 
-    print(f"\n\nCompleted. Results written to: {output_path}")
+    logger.info("Completed. Results written to: %s", output_path)
 
 
 if __name__ == "__main__":

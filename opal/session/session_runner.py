@@ -84,8 +84,7 @@ class SessionRunner:
         session.metadata["total_tool_calls"] = session.tool_call_count
         session.metadata["tool_usage"] = session.tool_usage
         session.metadata["status"] = "success"
-        if self.agent.verbose:
-            print(f"[Answer] {answer[:500]}{'...' if len(answer) > 500 else ''}")
+        logger.info("[Answer] %s", answer[:500])
         return answer
 
     def _max_steps_exceeded(self, session: SessionState, max_steps: int) -> str:
@@ -97,8 +96,7 @@ class SessionRunner:
         last = (
             session.trajectory[-1].content or session.trajectory[-1].tool_result or ""
         )
-        if self.agent.verbose:
-            print(f"[Max steps reached] Last output: {last[:200]}")
+        logger.warning("[Max steps reached] Last output: %s", last[:200])
         return last
 
     # ------------------------------------------------------------------
@@ -125,11 +123,55 @@ class SessionRunner:
         self.session_state.add_step(
             Step(role="tool", tool_call=tool_call_record, tool_result=observation)
         )
-        if self.agent.verbose:
-            print(f"[Injected search_pdf] query={user_query[:100]}")
-            print(
-                f"  Result: {observation[:200]}{'...' if len(observation) > 200 else ''}"
+        logger.info("[Injected search_pdf] query=%s", user_query[:100])
+
+    # ------------------------------------------------------------------
+    # Tool cycle recording
+    # ------------------------------------------------------------------
+
+    def _record_tool_cycle(
+        self,
+        response: ModelResponse,
+        observation: str,
+        session: SessionState,
+        step_idx: int,
+    ) -> None:
+        """Record a tool call and its observation as separate trajectory steps.
+
+        Always splits into Thought/Action/Observation when the response
+        contains both content (reasoning) and a tool call.  This gives a
+        cleaner signal for downstream RL analysis.
+        """
+        tc = response.tool_calls[0]
+        tool_call_record = {
+            "id": tc.id,
+            "name": tc.name,
+            "arguments": tc.arguments,
+        }
+
+        thought_text = response.content or ""
+
+        if thought_text:
+            # Thought (pure reasoning, no tool_call)
+            session.add_step(Step(role="assistant", content=thought_text))
+            # Action (pure tool call, no content)
+            session.add_step(
+                Step(role="assistant", content=None, tool_call=tool_call_record)
             )
+        else:
+            # No thought — single assistant step with the tool call
+            session.add_step(
+                Step(role="assistant", content=None, tool_call=tool_call_record)
+            )
+
+        # Observation (tool result)
+        session.add_step(
+            Step(role="tool", tool_call=tool_call_record, tool_result=observation)
+        )
+
+        logger.info(
+            "--- Cycle %d --- [Action] %s(%s)", step_idx + 1, tc.name, tc.arguments
+        )
 
     # ------------------------------------------------------------------
     # Canonical execution loop
@@ -152,7 +194,7 @@ class SessionRunner:
             if response.tool_calls:
                 tc = response.tool_calls[0]
                 observation = await self.env.execute_tool(tc.name, tc.arguments)
-                self.agent.record_tool_cycle(response, observation, session, step_idx)
+                self._record_tool_cycle(response, observation, session, step_idx)
                 continue
 
             return self._finish(response, session, step_idx)

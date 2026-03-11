@@ -2,10 +2,13 @@ import os
 import hashlib
 import asyncio
 import json
+import logging
 from collections import Counter
 from pathlib import Path
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm
+
+logger = logging.getLogger(__name__)
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
@@ -93,7 +96,9 @@ async def get_completion_async(prompt, model=None, semaphore=None):
                 _save_cache(model, prompt, text)
                 return text
             except Exception as e:
-                print(f"Attempt {attempt + 1} failed for model {model}: {e}")
+                logger.warning(
+                    "Attempt %d failed for model %s: %s", attempt + 1, model, e
+                )
                 await asyncio.sleep(1)
         return None
 
@@ -225,8 +230,8 @@ def judge_benchmark_results_from_file(
     no_answer_indexes = [
         i for i, result in enumerate(results) if result["verdict"] == "no_answer"
     ]
-    print(f"Incorrect indexes: {incorrect_indexes}")
-    print(f"No-answer indexes: {no_answer_indexes}")
+    logger.info("Incorrect indexes: %s", incorrect_indexes)
+    logger.info("No-answer indexes: %s", no_answer_indexes)
     return results, benchmark_results
 
 
@@ -243,7 +248,7 @@ def judge_benchmark_results_from_file_hybrid(
     hybrid_results = {}
     all_benchmark_results = None
     for model in models:
-        print(f"\nJudging results using model '{model}'...")
+        logger.info("Judging results using model '%s'...", model)
         results, benchmark_results = judge_benchmark_results_from_file(
             json_file_path,
             model=model,
@@ -322,7 +327,7 @@ def save_judged_results(
                 "judge_reasoning": judge["reasoning"],
             }
             f.write(json.dumps(enriched) + "\n")
-    print(f"Judged results saved to {output_path}")
+    logger.info("Judged results saved to %s", output_path)
 
 
 def _aggregate_tool_usage(benchmark_results: list[dict]) -> dict[str, float]:
@@ -372,16 +377,26 @@ def write_summary(
     ]
 
     # Agent cost metrics (steps and tool usage)
-    steps_values = [r.get("steps") for r in benchmark_results if r.get("steps") is not None]
-    tool_values = [r.get("total_tool_calls") for r in benchmark_results if r.get("total_tool_calls") is not None]
+    steps_values = [
+        r.get("steps") for r in benchmark_results if r.get("steps") is not None
+    ]
+    tool_values = [
+        r.get("total_tool_calls")
+        for r in benchmark_results
+        if r.get("total_tool_calls") is not None
+    ]
     if steps_values or tool_values:
         lines += ["", "Agent Cost:"]
         if steps_values:
             avg_steps = sum(steps_values) / len(steps_values)
-            lines.append(f"  Avg steps:        {avg_steps:.2f} (over {len(steps_values)} items)")
+            lines.append(
+                f"  Avg steps:        {avg_steps:.2f} (over {len(steps_values)} items)"
+            )
         if tool_values:
             avg_tools = sum(tool_values) / len(tool_values)
-            lines.append(f"  Avg tool calls:   {avg_tools:.2f} (over {len(tool_values)} items)")
+            lines.append(
+                f"  Avg tool calls:   {avg_tools:.2f} (over {len(tool_values)} items)"
+            )
 
     avg_tool_usage = _aggregate_tool_usage(benchmark_results)
     if avg_tool_usage:
@@ -397,7 +412,7 @@ def write_summary(
         lines += ["", f"No-answer indexes: {no_answer_ids}"]
 
     summary_path.write_text("\n".join(lines) + "\n")
-    print(f"Summary written to {summary_path}")
+    logger.info("Summary written to %s", summary_path)
 
 
 def clear_cache():
@@ -410,13 +425,15 @@ def clear_cache():
                 shutil.rmtree(child)
             else:
                 child.unlink()
-        print(f"Cache cleared: {CACHE_DIR}")
+        logger.info("Cache cleared: %s", CACHE_DIR)
     else:
-        print("No cache directory found.")
+        logger.info("No cache directory found.")
 
 
 if __name__ == "__main__":
     import argparse
+
+    logging.basicConfig(level=logging.INFO)
 
     parser = argparse.ArgumentParser(
         description="Evaluate finance benchmark results using LLM judges."
@@ -503,23 +520,37 @@ if __name__ == "__main__":
         judge_model_label = args.model
 
     accuracy = calculate_accuracy(results)
-    steps_values = [r.get("steps") for r in benchmark_results if r.get("steps") is not None]
-    tool_values = [r.get("total_tool_calls") for r in benchmark_results if r.get("total_tool_calls") is not None]
+    steps_values = [
+        r.get("steps") for r in benchmark_results if r.get("steps") is not None
+    ]
+    tool_values = [
+        r.get("total_tool_calls")
+        for r in benchmark_results
+        if r.get("total_tool_calls") is not None
+    ]
     cost_parts = []
     if steps_values:
-        cost_parts.append(f"avg_steps: {sum(steps_values)/len(steps_values):.2f}")
+        cost_parts.append(f"avg_steps: {sum(steps_values) / len(steps_values):.2f}")
     if tool_values:
-        cost_parts.append(f"avg_tool_calls: {sum(tool_values)/len(tool_values):.2f}")
+        cost_parts.append(f"avg_tool_calls: {sum(tool_values) / len(tool_values):.2f}")
     cost_str = f", {', '.join(cost_parts)}" if cost_parts else ""
-    print(
-        f"input: {args.file}, correct: {accuracy['correct']:.2%}, incorrect: {accuracy['incorrect']:.2%}, no_answer: {accuracy['no_answer']:.2%}{cost_str}"
+    logger.info(
+        "input: %s, correct: %.2f%%, incorrect: %.2f%%, no_answer: %.2f%%%s",
+        args.file,
+        accuracy["correct"] * 100,
+        accuracy["incorrect"] * 100,
+        accuracy["no_answer"] * 100,
+        cost_str,
     )
 
     avg_tool_usage = _aggregate_tool_usage(benchmark_results)
     if avg_tool_usage:
-        print("Avg tool usage per item:")
+        lines = ["Avg tool usage per item:"]
         for tool_name, avg in avg_tool_usage.items():
-            print(f"  {tool_name:20s} {avg:.2f}")
+            lines.append(f"  {tool_name:20s} {avg:.2f}")
+        logger.info("\n".join(lines))
 
     save_judged_results(benchmark_results, results, judge_model_label, output_path)
-    write_summary(args.file, judge_model_label, accuracy, results, benchmark_results, output_path)
+    write_summary(
+        args.file, judge_model_label, accuracy, results, benchmark_results, output_path
+    )

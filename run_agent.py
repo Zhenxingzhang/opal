@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from opal.environment.tool_environment import (
     SEARCH_WEB_TOOL,
     READ_PDF_TOOL,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def main():
@@ -33,12 +36,16 @@ async def main():
         experiment = load_config(args.config)
         agent_config = experiment.agent_config
         session_config = experiment.session_config
-        print(f"Experiment: {experiment.name}")
-        print(
-            f"Runner: max_steps={session_config.max_steps}, parallelism={experiment.parallelism}"
+        logger.info("Experiment: %s", experiment.name)
+        logger.info(
+            "Runner: max_steps=%d, parallelism=%d",
+            session_config.max_steps,
+            experiment.parallelism,
         )
-        print(
-            f"Semantic retrieval: top_k={experiment.sem_retrieval_config.top_k}, model={experiment.sem_retrieval_config.model_name}"
+        logger.info(
+            "Semantic retrieval: top_k=%d, model=%s",
+            experiment.sem_retrieval_config.top_k,
+            experiment.sem_retrieval_config.model_name,
         )
     else:
         session_config = SessionConfig(
@@ -56,9 +63,10 @@ async def main():
     runner = SessionRunner(session_config=session_config, agent_config=agent_config)
     answer = await runner.run(args.query)
 
-    print("\n\nFinal answer:", answer)
+    logger.info("Final answer: %s", answer)
     runner.print_trajectory()
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     asyncio.run(main())

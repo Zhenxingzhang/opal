@@ -2,8 +2,8 @@
 Agent interface for agentic design.
 
 The Agent class defines the interface for agents that act as policy objects.
-Each agent provides hooks for building messages, recording tool cycles, and
-pre-loop setup. The execution loop itself lives in the SessionRunner.
+Each agent provides hooks for building messages and pre-loop setup.
+The execution loop and tool cycle recording live in the SessionRunner.
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ from opal.agentic.llm_model import (
 )
 from opal.environment.tool import Tool
 from opal.session.session import SessionState
-from opal.environment.step import Step
 
 
 PROMPT_DIR = Path(__file__).parent.parent / "prompt"
@@ -76,15 +75,13 @@ class Agent:
     ToolEnvironment.
 
     Subclasses customise behaviour by overriding:
-    - ``build_messages``   — how the message list is constructed
-    - ``record_tool_cycle`` — how a tool call + observation is recorded
+    - ``build_messages`` — how the message list is constructed
     """
 
     system_prompt_name = ""
     system_prompt: str = ""
     model: LLMModel
     tools: list[Tool] = []
-    verbose: bool = True
 
     def _init_common(self, config: AgentConfig) -> None:
         """Shared initialization for all agent subclasses."""
@@ -94,7 +91,6 @@ class Agent:
             config.model_name,
             temperature=getattr(config, "temperature", 0.0),
         )
-        self.verbose = getattr(config, "verbose", True)
 
     # ------------------------------------------------------------------
     # Policy hooks (overridable)
@@ -103,106 +99,10 @@ class Agent:
     def build_messages(self, session: SessionState) -> list[dict]:
         """Build the message list for the LLM API call.
 
-        Default: system prompt + linear replay of trajectory.
-        Subclasses override to customise message construction.
-        """
-        messages: list[dict] = []
-        if self.system_prompt:
-            messages.append({"role": "system", "content": self.system_prompt})
-        for step in session.trajectory:
-            messages.append(step.to_message())
-        return messages
-
-    def record_tool_cycle(
-        self,
-        response: ModelResponse,
-        observation: str,
-        session: SessionState,
-        step_idx: int,
-    ) -> None:
-        """Record a tool call and its observation in the session trajectory."""
-        tc = response.tool_calls[0]
-        tool_call_record = {
-            "id": tc.id,
-            "name": tc.name,
-            "arguments": tc.arguments,
-        }
-        session.add_step(
-            Step(
-                role="assistant",
-                content=response.content,
-                tool_call=tool_call_record,
-            )
-        )
-        session.add_step(
-            Step(
-                role="tool",
-                tool_call=tool_call_record,
-                tool_result=observation,
-            )
-        )
-
-        if self.verbose:
-            print(f"[Step {step_idx + 1}] Tool: {tc.name}")
-            print(f"  Args: {tc.arguments}")
-            print(
-                f"  Obs:  {observation[:200]}{'...' if len(observation) > 200 else ''}"
-            )
-
-    # ------------------------------------------------------------------
-    # LLM interaction (not overridden by subclasses)
-    # ------------------------------------------------------------------
-
-    async def act(
-        self, messages: list[dict], call_number: int = 0
-    ) -> tuple[ModelResponse, LLMCallMetrics]:
-        """Call the LLM with the message history and return the response."""
-        return await self.model.call(
-            messages, self.tools if self.tools else None, call_number
-        )
-
-
-class DefaultAgent(Agent):
-    """General-purpose agent. Works with or without tools.
-
-    With no tools configured, makes a single LLM call and returns the response.
-    With tools, the SessionRunner drives a ReAct-style loop using the default
-    ``build_messages`` and ``record_tool_cycle`` hooks.
-    """
-
-    def __init__(self, config):
-        self._init_common(config)
-        self.tools = config.tools or []
-
-
-class ReActAgent(Agent):
-    """ReAct agent with explicit Thought/Action/Observation separation.
-
-    Each cycle's response is split into three distinct trajectory steps:
-
-        Step(role="assistant", content="I need to...")           # Thought
-        Step(role="assistant", content=None, tool_call={...})    # Action
-        Step(role="tool", tool_call={...}, tool_result="...")     # Observation
-
-    This gives a cleaner signal for downstream RL analysis compared to
-    DefaultAgent which merges Thought+Action into a single step.
-
-    Overrides ``build_messages`` to merge consecutive Thought+Action pairs
-    back into one assistant message (APIs reject consecutive assistant
-    messages), and ``record_tool_cycle`` for the 3-step split.
-    """
-
-    def __init__(self, config):
-        self._init_common(config)
-        self.tools = config.tools or []
-
-    def build_messages(self, session: SessionState) -> list[dict]:
-        """Build LLM messages, merging consecutive Thought+Action step pairs.
-
-        The trajectory stores Thought and Action as two separate ``assistant``
+        The trajectory stores Thought and Action as separate ``assistant``
         steps, but the LLM API rejects consecutive ``assistant`` messages.
-        This method detects the pattern and merges them into a single
-        ``assistant`` message with both ``content`` and ``tool_calls``.
+        This method detects Thought+Action pairs and merges them into a
+        single ``assistant`` message with both ``content`` and ``tool_calls``.
         """
         messages: list[dict] = []
         if self.system_prompt:
@@ -251,47 +151,40 @@ class ReActAgent(Agent):
 
         return messages
 
-    def record_tool_cycle(
-        self,
-        response: ModelResponse,
-        observation: str,
-        session: SessionState,
-        step_idx: int,
-    ) -> None:
-        """Split one LLM response into three separate trajectory steps."""
-        tc = response.tool_calls[0]
-        tool_call_record = {
-            "id": tc.id,
-            "name": tc.name,
-            "arguments": tc.arguments,
-        }
+    # ------------------------------------------------------------------
+    # LLM interaction (not overridden by subclasses)
+    # ------------------------------------------------------------------
 
-        thought_text = response.content or ""
-
-        if thought_text:
-            # Step 1 — Thought (pure reasoning, no tool_call)
-            session.add_step(Step(role="assistant", content=thought_text))
-            # Step 2 — Action (pure tool call, no content)
-            session.add_step(
-                Step(role="assistant", content=None, tool_call=tool_call_record)
-            )
-        else:
-            # No thought — single assistant step with the tool call
-            session.add_step(
-                Step(role="assistant", content=None, tool_call=tool_call_record)
-            )
-
-        # Step 3 — Observation (tool result)
-        session.add_step(
-            Step(role="tool", tool_call=tool_call_record, tool_result=observation)
+    async def act(
+        self, messages: list[dict], call_number: int = 0
+    ) -> tuple[ModelResponse, LLMCallMetrics]:
+        """Call the LLM with the message history and return the response."""
+        return await self.model.call(
+            messages, self.tools if self.tools else None, call_number
         )
 
-        if self.verbose:
-            print(f"--- Cycle {step_idx + 1} ---")
-            print(
-                f"[Thought] {thought_text[:300]}{'...' if len(thought_text) > 300 else ''}"
-            )
-            print(f"[Action]  {tc.name}({tc.arguments})")
-            print(
-                f"[Observation] {observation[:200]}{'...' if len(observation) > 200 else ''}"
-            )
+
+class DefaultAgent(Agent):
+    """General-purpose agent. Works with or without tools.
+
+    With no tools configured, makes a single LLM call and returns the response.
+    With tools, the SessionRunner drives a loop using ``build_messages``.
+    """
+
+    def __init__(self, config):
+        self._init_common(config)
+        self.tools = config.tools or []
+
+
+class ReActAgent(Agent):
+    """ReAct agent with explicit Thought/Action/Observation separation.
+
+    Uses a ReAct-style prompt that encourages the LLM to emit explicit
+    reasoning before each tool call. The SessionRunner records each cycle
+    as separate Thought/Action/Observation trajectory steps for cleaner
+    downstream RL analysis.
+    """
+
+    def __init__(self, config):
+        self._init_common(config)
+        self.tools = config.tools or []

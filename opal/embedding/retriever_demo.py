@@ -1,6 +1,10 @@
 """Example: index documents and query them using SemanticRetriever."""
 
+import logging
+
 from opal.embedding import SemanticRetriever
+
+logger = logging.getLogger(__name__)
 
 # Example documents to index
 DOCS = [
@@ -18,7 +22,7 @@ DOCS = [
 def main() -> None:
     retriever = SemanticRetriever()
     retriever.index(DOCS)
-    print(f"Indexed {retriever.document_count} documents")
+    logger.info("Indexed %d documents", retriever.document_count)
 
     queries = [
         "What animals make good pets?",
@@ -28,10 +32,12 @@ def main() -> None:
 
     for query in queries:
         results = retriever.search(query, top_k=3)
-        print(f"\nQuery: {query!r}")
+        lines = [f"Query: {query!r}"]
         for rank, result in enumerate(results, 1):
-            print(f"  {rank}. [{result.score:.4f}] {result.text}")
+            lines.append(f"  {rank}. [{result.score:.4f}] {result.text}")
+        logger.info("\n".join(lines))
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

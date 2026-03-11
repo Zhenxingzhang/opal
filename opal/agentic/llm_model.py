@@ -287,19 +287,3 @@ class AnthropicModel(LLMModel):
             content=content,
             tool_calls=tool_calls if tool_calls else None,
         )
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    async def _main():
-        model = OpenAIModel()
-        messages = [
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": "What is 2 + 2?"},
-        ]
-        response, metrics = await model.call(messages)
-        print(f"Response: {response.content}")
-        print(f"Metrics: {metrics}")
-
-    asyncio.run(_main())

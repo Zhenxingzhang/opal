@@ -12,7 +12,10 @@ Opens a browser with a UI showing:
 
 import argparse
 import json
+import logging
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 
 import yaml
@@ -375,17 +378,17 @@ def main():
 
     results_dir = Path(args.results_dir).resolve()
     if not results_dir.exists():
-        print(f"Error: results directory not found: {results_dir}")
+        logger.error("Results directory not found: %s", results_dir)
         return
 
-    print(f"Loading trajectories from {results_dir}...")
+    logger.info("Loading trajectories from %s...", results_dir)
     html_content = build_html(results_dir)
 
     # If --output is given (or server fails), write to file and open directly
     if args.output:
         out_path = Path(args.output).resolve()
         out_path.write_text(html_content, encoding="utf-8")
-        print(f"HTML written to {out_path}")
+        logger.info("HTML written to %s", out_path)
         import webbrowser
 
         webbrowser.open(f"file://{out_path}")
@@ -396,7 +399,7 @@ def main():
         ViewerHandler.html_content = html_content
         server = HTTPServer(("localhost", args.port), ViewerHandler)
         url = f"http://localhost:{args.port}"
-        print(f"Serving trajectory viewer at {url}")
+        logger.info("Serving trajectory viewer at %s", url)
 
         import webbrowser
 
@@ -405,17 +408,20 @@ def main():
         try:
             server.serve_forever()
         except KeyboardInterrupt:
-            print("\nShutting down.")
+            logger.info("Shutting down.")
             server.server_close()
     except OSError:
         # Port binding failed (sandbox, port in use, etc.) — fall back to file
         out_path = results_dir / "trajectory_viewer.html"
         out_path.write_text(html_content, encoding="utf-8")
-        print(f"Could not bind port {args.port}. HTML written to {out_path}")
+        logger.warning(
+            "Could not bind port %d. HTML written to %s", args.port, out_path
+        )
         import webbrowser
 
         webbrowser.open(f"file://{out_path}")
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

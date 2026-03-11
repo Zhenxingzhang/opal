@@ -2,11 +2,13 @@
 
 import argparse
 import json
+import logging
 from collections import Counter
-from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 def load_records(path: str) -> list[dict]:
@@ -163,8 +165,15 @@ def plot_accuracy_by_step_bucket(ax, records: list[dict]):
     ax.plot(step_vals, accuracies, "o-", color="#1565C0", linewidth=2, markersize=6)
 
     for x, y, n in zip(step_vals, accuracies, counts):
-        ax.annotate(f"n={n}", (x, y), textcoords="offset points", xytext=(0, 8),
-                    ha="center", fontsize=8, color="#555")
+        ax.annotate(
+            f"n={n}",
+            (x, y),
+            textcoords="offset points",
+            xytext=(0, 8),
+            ha="center",
+            fontsize=8,
+            color="#555",
+        )
 
     ax.set_xlabel("Steps", fontsize=11)
     ax.set_ylabel("Accuracy (%)", fontsize=11)
@@ -174,26 +183,33 @@ def plot_accuracy_by_step_bucket(ax, records: list[dict]):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Visualize FinanceBench judged outputs")
+    parser = argparse.ArgumentParser(
+        description="Visualize FinanceBench judged outputs"
+    )
     parser.add_argument(
         "path",
         nargs="?",
         default="results/gpt-4o-agentic-search-default-agent-advanced-react-prompt-v2-bge-large-calculator_20260311_125206/outputs_judged.jsonl",
         help="Path to outputs_judged.jsonl",
     )
-    parser.add_argument("--save", type=str, default=None, help="Save figure to file instead of showing")
+    parser.add_argument(
+        "--save", type=str, default=None, help="Save figure to file instead of showing"
+    )
     args = parser.parse_args()
 
     records = load_records(args.path)
 
-    # Print summary
     verdicts = Counter(r["judge_verdict"] for r in records)
-    print(f"Loaded {len(records)} records from {args.path}")
-    print(f"  Model: {records[0]['model_name']}")
-    print(f"  Judge: {records[0]['judge_model']}")
-    print(f"  Verdicts: {dict(verdicts)}")
     accuracy = verdicts.get("correct", 0) / len(records) * 100
-    print(f"  Accuracy: {accuracy:.1f}%")
+    logger.info(
+        "Loaded %d records from %s | Model: %s | Judge: %s | Verdicts: %s | Accuracy: %.1f%%",
+        len(records),
+        args.path,
+        records[0]["model_name"],
+        records[0]["judge_model"],
+        dict(verdicts),
+        accuracy,
+    )
 
     fig, axes = plt.subplots(2, 3, figsize=(18, 11))
     fig.suptitle(
@@ -214,10 +230,11 @@ def main():
 
     if args.save:
         fig.savefig(args.save, dpi=150, bbox_inches="tight")
-        print(f"Saved to {args.save}")
+        logger.info("Saved to %s", args.save)
     else:
         plt.show()
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()
