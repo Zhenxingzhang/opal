@@ -81,6 +81,8 @@ class SessionRunner:
         answer = response.content or ""
         session.add_step(Step(role="assistant", content=answer))
         session.metadata["steps"] = step_idx + 1
+        session.metadata["total_tool_calls"] = session.tool_call_count
+        session.metadata["tool_usage"] = session.tool_usage
         session.metadata["status"] = "success"
         if self.agent.verbose:
             print(f"[Answer] {answer[:500]}{'...' if len(answer) > 500 else ''}")
@@ -89,6 +91,8 @@ class SessionRunner:
     def _max_steps_exceeded(self, session: SessionState, max_steps: int) -> str:
         """Handle the case where the agent exhausted its step budget."""
         session.metadata["steps"] = max_steps
+        session.metadata["total_tool_calls"] = session.tool_call_count
+        session.metadata["tool_usage"] = session.tool_usage
         session.metadata["status"] = "max_steps_exceeded"
         last = (
             session.trajectory[-1].content or session.trajectory[-1].tool_result or ""

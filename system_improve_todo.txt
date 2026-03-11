@@ -1,0 +1,84 @@
+System Improvement TODO — Push FinanceBench Correct Score Above 50%
+====================================================================
+Current best: 46.67% (Exp 6: advanced ReAct prompt + search_pdf, gpt-4o)
+
+Priority 1: Upgrade Embedding Model                          [Expected: +5-8pp, Effort: Low]
+--------------------------------------------------------------------------------
+- Current: all-MiniLM-L6-v2 (384-dim, general-purpose, weak on retrieval benchmarks)
+- Target: BAAI/bge-large-en-v1.5 (1024-dim, top-tier on MTEB retrieval)
+- Alternative: intfloat/e5-large-v2 (strong on asymmetric query->passage search)
+- Works as drop-in replacement via semantic_retrieval.model_name config
+- Note: BGE models recommend query prefix "Represent this sentence: " for best
+  results; sentence-transformers v5+ handles this automatically
+- BLOCKER: HuggingFace download blocked by proxy (403 Forbidden). Need to
+  download model via VPN/direct connection or pre-cache it manually.
+- Config already created: finance_bench/configs/gpt-4o/default_agent/
+  agentic_search_default_agent_advanced_react_prompt_bge_large.yaml
+
+Priority 2: Add Cross-Encoder Reranker                       [Expected: +3-5pp, Effort: Medium]
+--------------------------------------------------------------------------------
+- Two-stage retrieval: bi-encoder recall (top_k=20) -> cross-encoder rerank (top 5)
+- Candidates: cross-encoder/ms-marco-MiniLM-L-12-v2, BAAI/bge-reranker-v2-m3
+- Cross-encoders score (query, passage) pairs jointly — far more accurate than
+  bi-encoder cosine similarity for relevance judgment
+- Requires adding a rerank step in SemanticRetriever.search()
+
+Priority 3: Ensure Calculator Tool is Available               [Expected: +2-4pp, Effort: Low]
+--------------------------------------------------------------------------------
+- Many FinanceBench questions require computation (YoY growth, ratios, margins)
+- CALCULATOR_TOOL exists in tool_environment.py but is not included in Exp 6 config
+- Add "calculator" to the tools list in the experiment config
+- Converts incorrect answers (right data, wrong math) into correct ones
+
+Priority 4: Table-Aware Chunking                              [Expected: +3-5pp, Effort: Medium]
+--------------------------------------------------------------------------------
+- Current chunking is character-based (splits blindly across tables/sentences)
+- Financial PDFs are table-heavy; tables carry most of the answer content
+- Use pymupdf's page.find_tables() to extract tables as structured data
+- Index tables as separate chunks with metadata (page number, table title)
+- Also try larger chunks (2048 chars) with more overlap (200 chars)
+
+Priority 5: Self-Verification Prompt Step                     [Expected: +2-3pp, Effort: Low]
+--------------------------------------------------------------------------------
+- Add verification instructions before final answer:
+  1. Did you find the specific numbers/data in the document?
+  2. If computation was required, did you use the calculator tool?
+  3. Does your answer directly address what was asked?
+  4. Cross-check: search with different terms to confirm
+- Reduces confident hallucinations (incorrect rate is 38% in Exp 6)
+
+Priority 6: Increase max_steps                                [Expected: +1-2pp, Effort: Trivial]
+--------------------------------------------------------------------------------
+- Currently 10 steps; complex questions may exhaust the budget
+- Increase to 15 or 20; cost is low since most questions terminate early
+
+Priority 7: Hybrid Retrieval (BM25 + Semantic)                [Expected: +3-5pp, Effort: Medium]
+--------------------------------------------------------------------------------
+- Add BM25/keyword search alongside semantic search
+- Financial docs use precise terms (ticker symbols, exact line-item names like
+  "Total stockholders' equity") that keyword search handles better
+- Simple fusion: take top-5 from each method, deduplicate, return union
+- Libraries: rank_bm25 or tantivy (via tantivy-py)
+
+Priority 8: Multi-Query Retrieval                             [Expected: +2-3pp, Effort: Medium]
+--------------------------------------------------------------------------------
+- Generate 2-3 query variations per search (synonyms, alternate phrasing)
+- Merge and deduplicate results across queries
+- Can implement as a search_pdf_multi tool or prompt the agent to always
+  do at least 2 searches with different phrasings before answering
+
+Priority 9: Try Stronger / Reasoning Models                   [Expected: +5-10pp, Effort: Low]
+--------------------------------------------------------------------------------
+- o3-mini or o4-mini (reasoning models, better at multi-step financial reasoning)
+- claude-sonnet-4-6 (competitive, often better at following structured prompts)
+- Majority vote: temperature 0.3, 3 runs, take majority answer
+
+Priority 10: Page Metadata + read_page Tool                   [Expected: +2-3pp, Effort: Medium]
+--------------------------------------------------------------------------------
+- Attach page numbers to each chunk during indexing
+- Add a read_page tool that returns full text of a specific page
+- Lets the agent get full context around a relevant chunk
+- READ_PDF_TOOL already exists in tool_environment.py — evaluate adding it
+
+Estimated Combined Impact (Priorities 1-6): ~55-65% correct
+====================================================================

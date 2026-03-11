@@ -78,6 +78,8 @@ async def process_question(
             "gold_answer": question_row["answer"],
             "model_answer": model_answer,
             "label": "",  # To be filled by evaluation
+            "steps": session_runner.metadata.get("steps", 0),
+            "total_tool_calls": session_runner.metadata.get("total_tool_calls", 0),
         }
         await results_queue.put(question_result)
         print(f"Completed: {question_row['financebench_id']}")
@@ -195,10 +197,18 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Run finance benchmark evaluation")
     parser.add_argument(
+        "config",
+        type=str,
+        nargs="?",
+        default=None,
+        help="Path to a YAML experiment config file",
+    )
+    parser.add_argument(
         "--config",
         type=str,
-        required=True,
-        help="Path to a YAML experiment config file",
+        dest="config_flag",
+        default=None,
+        help="Path to a YAML experiment config file (alternative to positional)",
     )
     parser.add_argument(
         "--concurrency",
@@ -216,10 +226,14 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    config_path = args.config or args.config_flag
+    if not config_path:
+        parser.error("config is required (positional or via --config)")
+
     asyncio.run(
         main(
             max_concurrent=args.concurrency,
             max_tasks=args.max_tasks,
-            config_path=args.config,
+            config_path=config_path,
         )
     )

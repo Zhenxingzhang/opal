@@ -1,6 +1,7 @@
 """SessionState manages the conversation state for an agent."""
 
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -20,6 +21,18 @@ class SessionState:
     def add_step(self, step: Step):
         """Add a step to the trajectory."""
         self.trajectory.append(step)
+
+    @property
+    def tool_call_count(self) -> int:
+        return sum(1 for s in self.trajectory if s.role == "assistant" and s.tool_call)
+
+    @property
+    def tool_usage(self) -> dict[str, int]:
+        counts: Counter[str] = Counter()
+        for s in self.trajectory:
+            if s.role == "assistant" and s.tool_call:
+                counts[s.tool_call["name"]] += 1
+        return dict(counts)
 
     def reset(self):
         """Clear trajectory and metadata for a fresh run, generate new id."""

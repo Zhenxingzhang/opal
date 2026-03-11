@@ -1,4 +1,4 @@
-name: gpt-4o-agentic-search-default-agent-advanced-react-prompt
+name: gpt-4o-agentic-search-default-agent-advanced-react-prompt-calculator
 parallelism: 10
 
 session_runner:
@@ -11,3 +11,4 @@ agent:
   system_prompt_name: advanced_react_prompt
   tools:
     - search_pdf
+    - calculator

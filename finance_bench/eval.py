@@ -2,6 +2,7 @@ import os
 import hashlib
 import asyncio
 import json
+from collections import Counter
 from pathlib import Path
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm
@@ -324,11 +325,30 @@ def save_judged_results(
     print(f"Judged results saved to {output_path}")
 
 
+def _aggregate_tool_usage(benchmark_results: list[dict]) -> dict[str, float]:
+    """Compute average per-tool call count across benchmark results.
+
+    Returns a dict mapping tool name to average calls per item (only items
+    that have ``tool_usage`` data are counted).
+    """
+    total: Counter[str] = Counter()
+    count = 0
+    for r in benchmark_results:
+        usage = r.get("tool_usage")
+        if usage and isinstance(usage, dict):
+            total.update(usage)
+            count += 1
+    if count == 0:
+        return {}
+    return {tool: total[tool] / count for tool in sorted(total)}
+
+
 def write_summary(
     input_file: str,
     judge_model: str,
     accuracy: dict[str, float],
     results: list[dict],
+    benchmark_results: list[dict],
     output_path: str,
 ):
     """Write a short summary of the eval results to a text file next to the judged output."""
@@ -350,6 +370,24 @@ def write_summary(
         f"  Incorrect:   {incorrect}/{total} ({accuracy['incorrect']:.2%})",
         f"  No answer:   {no_answer}/{total} ({accuracy['no_answer']:.2%})",
     ]
+
+    # Agent cost metrics (steps and tool usage)
+    steps_values = [r.get("steps") for r in benchmark_results if r.get("steps") is not None]
+    tool_values = [r.get("total_tool_calls") for r in benchmark_results if r.get("total_tool_calls") is not None]
+    if steps_values or tool_values:
+        lines += ["", "Agent Cost:"]
+        if steps_values:
+            avg_steps = sum(steps_values) / len(steps_values)
+            lines.append(f"  Avg steps:        {avg_steps:.2f} (over {len(steps_values)} items)")
+        if tool_values:
+            avg_tools = sum(tool_values) / len(tool_values)
+            lines.append(f"  Avg tool calls:   {avg_tools:.2f} (over {len(tool_values)} items)")
+
+    avg_tool_usage = _aggregate_tool_usage(benchmark_results)
+    if avg_tool_usage:
+        lines += ["", "Avg Tool Usage (per item):"]
+        for tool_name, avg in avg_tool_usage.items():
+            lines.append(f"  {tool_name:20s} {avg:.2f}")
 
     incorrect_ids = [i for i, r in enumerate(results) if r["verdict"] == "incorrect"]
     no_answer_ids = [i for i, r in enumerate(results) if r["verdict"] == "no_answer"]
@@ -465,9 +503,23 @@ if __name__ == "__main__":
         judge_model_label = args.model
 
     accuracy = calculate_accuracy(results)
+    steps_values = [r.get("steps") for r in benchmark_results if r.get("steps") is not None]
+    tool_values = [r.get("total_tool_calls") for r in benchmark_results if r.get("total_tool_calls") is not None]
+    cost_parts = []
+    if steps_values:
+        cost_parts.append(f"avg_steps: {sum(steps_values)/len(steps_values):.2f}")
+    if tool_values:
+        cost_parts.append(f"avg_tool_calls: {sum(tool_values)/len(tool_values):.2f}")
+    cost_str = f", {', '.join(cost_parts)}" if cost_parts else ""
     print(
-        f"input: {args.file}, correct: {accuracy['correct']:.2%}, incorrect: {accuracy['incorrect']:.2%}, no_answer: {accuracy['no_answer']:.2%}"
+        f"input: {args.file}, correct: {accuracy['correct']:.2%}, incorrect: {accuracy['incorrect']:.2%}, no_answer: {accuracy['no_answer']:.2%}{cost_str}"
     )
 
+    avg_tool_usage = _aggregate_tool_usage(benchmark_results)
+    if avg_tool_usage:
+        print("Avg tool usage per item:")
+        for tool_name, avg in avg_tool_usage.items():
+            print(f"  {tool_name:20s} {avg:.2f}")
+
     save_judged_results(benchmark_results, results, judge_model_label, output_path)
-    write_summary(args.file, judge_model_label, accuracy, results, output_path)
+    write_summary(args.file, judge_model_label, accuracy, results, benchmark_results, output_path)
