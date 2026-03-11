@@ -1,4 +1,4 @@
-name: gpt-4o-agentic-search-default-agent-basic-prompt
+name: gpt-4o-agentic-search-default-agent-advanced-search-prompt
 parallelism: 10
 
 session_runner:
