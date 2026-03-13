@@ -84,7 +84,7 @@ class SessionRunner:
         session.metadata["total_tool_calls"] = session.tool_call_count
         session.metadata["tool_usage"] = session.tool_usage
         session.metadata["status"] = "success"
-        logger.info("[Answer] %s", answer[:500])
+        logger.debug("[Answer] %s", answer[:500])
         return answer
 
     def _max_steps_exceeded(self, session: SessionState, max_steps: int) -> str:
@@ -169,7 +169,7 @@ class SessionRunner:
             Step(role="tool", tool_call=tool_call_record, tool_result=observation)
         )
 
-        logger.info(
+        logger.debug(
             "--- Cycle %d --- [Action] %s(%s)", step_idx + 1, tc.name, tc.arguments
         )
 
@@ -214,6 +214,7 @@ class SessionRunner:
         Run the agent on a user query. Returns the final text answer.
         The full trajectory is stored in self.session_state.trajectory.
         """
+        task_id = self.session_state.metadata.get("task_id")
         self.session_state.reset()
         self.session_state.metadata = {
             "timestamp": datetime.now().isoformat(),
@@ -223,11 +224,15 @@ class SessionRunner:
             "model": self.agent.model.get_name(),
             "retriever": self.env.retriever.summary() if self.env.retriever else None,
         }
+        if task_id:
+            self.session_state.metadata["task_id"] = task_id
 
         session_logger: SessionLogger | None = None
         if self.session_config.enable_logging:
             session_logger = SessionLogger(
-                self.session_config.logging_dir_root, self.session_state.id
+                self.session_config.logging_dir_root,
+                self.session_state.id,
+                task_id=task_id,
             )
 
         result = await self._execute_loop(user_query)

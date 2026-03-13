@@ -86,6 +86,9 @@ class SemanticRetrievalConfig:
 
     top_k: int = 5
     model_name: str = "all-MiniLM-L6-v2"
+    reranker_model_name: str | None = None
+    chunk_size: int = 1024
+    chunk_overlap: int = 30
 
 
 @dataclass

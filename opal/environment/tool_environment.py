@@ -54,12 +54,13 @@ def _calculator(expression: str) -> str:
         return f"Error: {e}"
 
 
-def _search_pdf(query: str, top_k: int = 5, env=None) -> str:
+def _search_pdf(query: str, top_k: int | None = None, env=None) -> str:
     """Search the loaded PDF for content relevant to the query using semantic retrieval.
 
     Args:
         query: The search query.
-        top_k: Number of results to return.
+        top_k: Number of results to return. If not provided, uses the
+            configured ``retriever_top_k`` from the ToolEnvironment.
         env: ToolEnvironment providing the per-run SemanticRetriever.
     """
     if env is None or env.retriever is None:
@@ -67,6 +68,8 @@ def _search_pdf(query: str, top_k: int = 5, env=None) -> str:
             "Error: no PDF document loaded. Provide a ToolEnvironment with a retriever."
         )
 
+    if top_k is None:
+        top_k = env.retriever_top_k
     results = env.retriever.search(query, top_k=top_k)
     if not results:
         return "No relevant content found."
@@ -230,6 +233,7 @@ class ToolEnvironment:
     """
 
     retriever: SemanticRetriever | None = None
+    retriever_top_k: int = 5
     tool_map: dict[str, Tool] = field(default_factory=dict)
     extras: dict[str, Any] = field(default_factory=dict)
 

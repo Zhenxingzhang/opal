@@ -26,3 +26,6 @@ If the results from `search_pdf` are not helpful, DO NOT repeat the same query. 
 3. **Incorporate context from earlier observations.** Use names, section headings, or table labels you already found to refine the next search. For example, if you found a section titled "Segment Information", search within that context.
 4. **Search for the table or section, not the answer.** Instead of querying for a computed value, search for the table or disclosure that would contain the raw data you need (e.g., "consolidated balance sheet 2023" or "notes to financial statements lease obligations").
 5. **Break complex questions into parts.** If the question requires multiple data points, search for each one separately rather than putting everything into a single query.
+
+## Tool Usage Budget
+You may use each tool at most 3 times per task. Plan your tool calls carefully to stay within this budget. If you have already used a tool 3 times, do not call it again — work with the information you have.

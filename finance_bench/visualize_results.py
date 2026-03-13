@@ -24,10 +24,10 @@ def plot_verdict_pie(ax, records: list[dict]):
     colors = {"correct": "#4CAF50", "incorrect": "#F44336", "no_answer": "#9E9E9E"}
     labels = list(verdicts.keys())
     sizes = list(verdicts.values())
-    cs = [colors.get(l, "#607D8B") for l in labels]
+    cs = [colors.get(label, "#607D8B") for label in labels]
     wedges, texts, autotexts = ax.pie(
         sizes,
-        labels=[f"{l}\n({v})" for l, v in zip(labels, sizes)],
+        labels=[f"{label}\n({v})" for label, v in zip(labels, sizes)],
         colors=cs,
         autopct="%1.1f%%",
         startangle=90,

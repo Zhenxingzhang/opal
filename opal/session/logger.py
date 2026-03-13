@@ -18,9 +18,11 @@ logger = logging.getLogger(__name__)
 class SessionLogger:
     """Writes all accumulated session data to disk."""
 
-    def __init__(self, output_dir: Path, session_id: str) -> None:
+    def __init__(self, output_dir: Path, session_id: str, task_id: str | None = None) -> None:
         self._session_id = session_id
-        self._session_dir = output_dir / "sessions" / session_id[:8]
+        short_id = session_id[:8]
+        dir_name = f"{task_id}_{short_id}" if task_id else short_id
+        self._session_dir = output_dir / "sessions" / dir_name
 
     def flush(self, session_state: SessionState) -> None:
         """Write all LLM call records and the trajectory to disk."""

@@ -58,3 +58,6 @@ uv run ruff format .
 - Prompts live in `opal/prompt/` as `.txt` files
 - LLM call logs go to `results/<run>/llm_calls/` when `enable_logging=True` in `SessionConfig`
 - Evaluation cache in `.eval_cache/`
+
+
+

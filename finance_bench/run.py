@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 
 from opal import AgentConfig, SessionRunner, SessionConfig
-from opal.config import load_config
+from opal.config import SemanticRetrievalConfig, load_config
 from opal.environment.tool_environment import ToolEnvironment
 from utils import build_retriever, PATH_ROOT, PATH_FINANCE_BENCH
 
@@ -45,33 +45,35 @@ async def process_question(
     session_config: SessionConfig,
     question_row: pd.Series,
     results_queue: asyncio.Queue,
-    retrieval_model_name: str = "all-MiniLM-L6-v2",
+    retrieval_config: SemanticRetrievalConfig | None = None,
 ):
     """Process a single question with concurrency control."""
     async with concurrency_limiter:
         doc_name = question_row["doc_name"]
         logger.debug("doc_name: %s", doc_name)
-        retriever = build_retriever(doc_name, model_name=retrieval_model_name)
+        retriever = build_retriever(doc_name, retrieval_config=retrieval_config)
         logger.debug("retriever: %s", retriever.summary())
-        tool_env = ToolEnvironment(retriever=retriever)
+        tool_env = ToolEnvironment(retriever=retriever, retriever_top_k=retrieval_config.top_k)
         session_runner = SessionRunner(
             session_config=session_config,
             agent_config=agent_config,
             env=tool_env,
         )
+        financebench_id = question_row["financebench_id"]
+        session_runner.session_state.metadata["task_id"] = financebench_id
         question = question_row["question"]
         logger.info(
-            "Processing: %s - %s...", question_row["financebench_id"], question[:50]
+            "Processing: %s - %s...", financebench_id, question[:50]
         )
 
         try:
             model_answer = await session_runner.run(question)
         except Exception as e:
-            logger.error("Error processing %s: %s", question_row["financebench_id"], e)
+            logger.error("Error processing %s: %s", financebench_id, e)
             model_answer = f"Error: {e}"
 
         question_result = {
-            "financebench_id": question_row["financebench_id"],
+            "financebench_id": financebench_id,
             "model_name": agent_config.model_name,
             "system_prompt": session_runner.agent.system_prompt,
             "tools": [tool.name for tool in session_runner.agent.tools],
@@ -107,6 +109,9 @@ async def main(
     max_concurrent: int = MAX_CONCURRENT_TASKS,
     max_tasks: int | None = None,
 ):
+
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
     ##############################################################################
     # LOAD DATASET
     ##############################################################################
@@ -142,7 +147,7 @@ async def main(
     agent_config = experiment_config.agent_config
     session_config = experiment_config.session_config
     max_concurrent = experiment_config.parallelism
-    retrieval_model_name = experiment_config.sem_retrieval_config.model_name
+    retrieval_config = experiment_config.sem_retrieval_config
     logger.info("Experiment: %s", experiment_config.name)
 
     # Shared timestamp for this run
@@ -173,7 +178,7 @@ async def main(
             session_config,
             question_row,
             results_queue,
-            retrieval_model_name,
+            retrieval_config,
         )
         for _, question_row in df_questions.iterrows()
     ]
@@ -232,8 +237,8 @@ if __name__ == "__main__":
 
     asyncio.run(
         main(
+            config_path=config_path,
             max_concurrent=args.concurrency,
             max_tasks=args.max_tasks,
-            config_path=config_path,
         )
     )

@@ -11,7 +11,10 @@ from pathlib import Path
 
 import numpy as np
 
-from opal.embedding.embedding_model_cache import get_sentence_transformer
+from opal.embedding.embedding_model_cache import (
+    get_cross_encoder,
+    get_sentence_transformer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +74,11 @@ class SemanticRetriever:
         self,
         model_name: str = "all-MiniLM-L6-v2",
         cache_dir: str | Path | None = _DEFAULT_CACHE_DIR,
+        reranker_model_name: str | None = None,
     ) -> None:
         self.model_name = model_name
         self.cache_dir = Path(cache_dir) if cache_dir is not None else None
+        self.reranker_model_name = reranker_model_name
         self._chunks: list[str] = []
         self._num_docs: int = 0
         self._embeddings: np.ndarray | None = None
@@ -125,7 +130,9 @@ class SemanticRetriever:
         # Encode from scratch
         model = get_sentence_transformer(self.model_name)
         self._chunks = list(chunks)
-        self._embeddings = model.encode(chunks, convert_to_numpy=True)
+        self._embeddings = model.encode(
+            chunks, convert_to_numpy=True, show_progress_bar=False
+        )
         logger.info(
             "Indexed %d chunks from %d docs (dim=%d)",
             len(chunks),
@@ -155,7 +162,9 @@ class SemanticRetriever:
         self._num_docs += num_docs if num_docs is not None else len(chunks)
 
         model = get_sentence_transformer(self.model_name)
-        new_embeddings: np.ndarray = model.encode(chunks, convert_to_numpy=True)
+        new_embeddings: np.ndarray = model.encode(
+            chunks, convert_to_numpy=True, show_progress_bar=False
+        )
 
         self._chunks.extend(chunks)
         if self._embeddings is None:
@@ -177,12 +186,17 @@ class SemanticRetriever:
     def search(self, query: str, top_k: int = 5) -> list[SearchResult]:
         """Return the *top_k* most similar documents to *query*.
 
+        When a ``reranker_model_name`` is configured, performs two-stage
+        retrieval: bi-encoder recall of a wider candidate set followed by
+        cross-encoder reranking down to *top_k*.
+
         Args:
             query: The search query string.
             top_k: Number of results to return.
 
         Returns:
-            List of :class:`SearchResult` ordered by descending similarity.
+            List of :class:`SearchResult` ordered by descending similarity /
+            relevance.
 
         Raises:
             ValueError: If no documents have been indexed yet.
@@ -190,18 +204,79 @@ class SemanticRetriever:
         if self._embeddings is None or len(self._chunks) == 0:
             raise ValueError("No documents indexed. Call index() or add() first.")
 
+        # Stage 1: bi-encoder recall
+        recall_top_k = top_k
+        if self.reranker_model_name is not None:
+            # Fetch a wider candidate set for the reranker to choose from
+            recall_top_k = min(max(top_k * 10, 50), len(self._chunks))
+
         model = get_sentence_transformer(self.model_name)
-        query_embedding: np.ndarray = model.encode(query, convert_to_numpy=True)
+        query_embedding: np.ndarray = model.encode(
+            query, convert_to_numpy=True, show_progress_bar=False
+        )
 
         scores = self._cosine_similarity(query_embedding, self._embeddings)
-        top_k = min(top_k, len(self._chunks))
-        top_indices = np.argpartition(-scores, top_k)[:top_k]
+        recall_top_k = min(recall_top_k, len(self._chunks))
+        # argpartition requires kth < len(arr); clamp to avoid off-by-one
+        # when recall_top_k == len(chunks) (happens with small documents).
+        kth = min(recall_top_k, len(scores) - 1)
+        top_indices = np.argpartition(-scores, kth)[:recall_top_k]
         top_indices = top_indices[np.argsort(-scores[top_indices])]
 
-        return [
+        candidates = [
             SearchResult(text=self._chunks[i], index=int(i), score=float(scores[i]))
             for i in top_indices
         ]
+
+        # Stage 2: cross-encoder rerank (if configured)
+        if self.reranker_model_name is not None and len(candidates) > top_k:
+            candidates = self._rerank(query, candidates, top_k)
+
+        return candidates[:top_k]
+
+    def _rerank(
+        self, query: str, candidates: list[SearchResult], top_k: int
+    ) -> list[SearchResult]:
+        """Rerank candidates using a cross-encoder model.
+
+        Args:
+            query: The search query.
+            candidates: Bi-encoder recall results to rerank.
+            top_k: Number of results to keep after reranking.
+
+        Returns:
+            Reranked list of :class:`SearchResult` (descending relevance).
+        """
+        assert self.reranker_model_name is not None
+        cross_encoder = get_cross_encoder(self.reranker_model_name)
+
+        # Capture bi-encoder top-k before reranking for diagnostics
+        biencoder_top_indices = [c.index for c in candidates[:top_k]]
+
+        pairs = [[query, c.text] for c in candidates]
+        ce_scores = cross_encoder.predict(pairs, show_progress_bar=False)
+
+        # Replace bi-encoder scores with cross-encoder scores
+        for candidate, ce_score in zip(candidates, ce_scores):
+            candidate.score = float(ce_score)
+
+        candidates.sort(key=lambda r: r.score, reverse=True)
+
+        # Log how much the ordering changed so we can diagnose reranker impact
+        reranked_top_indices = [c.index for c in candidates[:top_k]]
+        logger.info(
+            "Reranked %d candidates -> top %d (model=%s) | "
+            "bi-encoder top-%d chunk indices: %s | "
+            "reranked top-%d chunk indices: %s",
+            len(candidates),
+            top_k,
+            self.reranker_model_name,
+            top_k,
+            biencoder_top_indices,
+            top_k,
+            reranked_top_indices,
+        )
+        return candidates[:top_k]
 
     # ------------------------------------------------------------------
     # Cache persistence
@@ -286,9 +361,14 @@ class SemanticRetriever:
     def summary(self) -> str:
         """Return a summary string with key retriever information."""
         dim = self._embeddings.shape[1] if self._embeddings is not None else 0
+        reranker = (
+            f", reranker={self.reranker_model_name!r}"
+            if self.reranker_model_name
+            else ""
+        )
         return (
             f"SemanticRetriever(model={self.model_name!r}, "
-            f"docs={self._num_docs}, chunks={len(self._chunks)}, dim={dim})"
+            f"docs={self._num_docs}, chunks={len(self._chunks)}, dim={dim}{reranker})"
         )
 
     # ------------------------------------------------------------------

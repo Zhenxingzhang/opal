@@ -14,11 +14,11 @@ import argparse
 import json
 import logging
 from http.server import HTTPServer, SimpleHTTPRequestHandler
-
-logger = logging.getLogger(__name__)
 from pathlib import Path
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 def find_sessions(run_dir: Path) -> list[dict]:

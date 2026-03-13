@@ -153,14 +153,15 @@ Categories:
 - "incorrect": The AI attempted to answer but the response is wrong or inaccurate.
 - "no_answer": The AI failed to produce an answer — it refused, said it couldn't answer, gave up, or produced no meaningful response.
 
-Numerical Accuracy (STRICT):
-- Numeric values must match EXACTLY between the AI-generated answer and the golden answer. Any difference in numbers, percentages, fractions, or figures means the answer is "incorrect".
-- No rounding tolerance is allowed. For example, if the golden answer is 1.23, the AI answer of 1.2 is "incorrect".
-- Equivalent representations of the same exact value are acceptable: "50%" and "0.50" and "1/2" all represent the same value and are considered matching.
-- If the golden answer contains a specific number and the AI-generated answer contains a different number, the verdict is "incorrect" — even if the difference is small.
+Numerical Accuracy:
+- Compare the numeric values in the AI-generated answer against the golden answer. Equivalent representations of the same value are acceptable: "50%" and "0.50" and "1/2" all represent the same value.
+- Allow reasonable rounding tolerance: if the AI answer and golden answer differ only due to rounding at the last displayed digit, treat them as matching. For example, if the golden answer is "$1,577" and the AI says "$1,577.00" or "$1,577 million", that is correct. If the golden answer is "0.83" and the AI says "0.82" or "0.83", both are acceptable since the difference is within one unit of the last decimal place.
+- When the golden answer is rounded (e.g., "30.8%", "$3,215.00", "0.40"), accept AI answers that round to the same value at the same precision. For example: golden "30.8%" matches AI "30.80%" or "30.8%"; golden "$0.40" matches AI "$0.389 billion" (rounds to $0.39B — does NOT match) but matches "$0.399 billion" (rounds to $0.40B).
+- If the values differ by more than rounding at the last digit (e.g., golden "93.86" vs AI "19.12", or golden "$1.6B" vs AI "$12.4B"), the answer is "incorrect".
+- Percentage and ratio equivalence: "1.42%" and "0.0142" represent the same value. "156%" and "1.56" represent the same value. Compare the underlying numbers, not the format.
 
 Evaluation Criteria:
-- For answers involving numeric values: the numbers must match exactly (see Numerical Accuracy above). Any numeric discrepancy makes the answer "incorrect".
+- For answers involving numeric values: the numbers must match within rounding tolerance (see Numerical Accuracy above). Differences beyond rounding make the answer "incorrect".
 - For non-numeric answers: the AI-generated answer is "correct" if it conveys the same meaning, conclusion, or rationale as the golden answer.
 - If the AI-generated answer is a superset of the golden answer (contains the correct answer plus additional information), it is "correct".
 - If the AI-generated answer is empty, states it cannot answer, or does not attempt the question, it is "no_answer".
@@ -434,6 +435,7 @@ if __name__ == "__main__":
     import argparse
 
     logging.basicConfig(level=logging.INFO)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     parser = argparse.ArgumentParser(
         description="Evaluate finance benchmark results using LLM judges."

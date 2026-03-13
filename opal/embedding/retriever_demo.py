@@ -7,7 +7,7 @@ from opal.embedding import SemanticRetriever
 logger = logging.getLogger(__name__)
 
 # Example documents to index
-DOCS = [
+CHUNKS = [
     "The cat sat on the mat.",
     "Dogs are loyal companions.",
     "Python is a popular programming language.",
@@ -21,8 +21,8 @@ DOCS = [
 
 def main() -> None:
     retriever = SemanticRetriever()
-    retriever.index(DOCS)
-    logger.info("Indexed %d documents", retriever.document_count)
+    retriever.index(CHUNKS)
+    logger.info("Indexed %d chunks", retriever.document_count)
 
     queries = [
         "What animals make good pets?",
