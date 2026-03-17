@@ -60,4 +60,4 @@ uv run ruff format .
 - Evaluation cache in `.eval_cache/`
 
 
-
+For FinanceBench analysis tasks, use the skill scripts in .claude/skills/ first. Results may be in JSONL format with varying schemas — always inspect the file structure before running analysis.

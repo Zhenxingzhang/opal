@@ -46,12 +46,16 @@ async def process_question(
     question_row: pd.Series,
     results_queue: asyncio.Queue,
     retrieval_config: SemanticRetrievalConfig | None = None,
+    shared_retriever: "SemanticRetriever | None" = None,
 ):
     """Process a single question with concurrency control."""
     async with concurrency_limiter:
-        doc_name = question_row["doc_name"]
-        logger.debug("doc_name: %s", doc_name)
-        retriever = build_retriever(doc_name, retrieval_config=retrieval_config)
+        if shared_retriever is not None:
+            retriever = shared_retriever
+        else:
+            doc_name = question_row["doc_name"]
+            logger.debug("doc_name: %s", doc_name)
+            retriever = build_retriever(doc_name, retrieval_config=retrieval_config)
         logger.debug("retriever: %s", retriever.summary())
         tool_env = ToolEnvironment(retriever=retriever, retriever_top_k=retrieval_config.top_k)
         session_runner = SessionRunner(
@@ -166,6 +170,13 @@ async def main(
 
     logger.info("Running with max %d concurrent tasks", max_concurrent)
 
+    # Build shared all-docs retriever if configured
+    shared_retriever = None
+    if retrieval_config.use_all_docs:
+        logger.info("Building shared retriever over ALL documents...")
+        shared_retriever = build_retriever("all", retrieval_config=retrieval_config)
+        logger.info("Shared retriever ready: %s", shared_retriever.summary())
+
     # Create semaphore for concurrency control
     concurrency_limiter = asyncio.Semaphore(max_concurrent)
     results_queue = asyncio.Queue()
@@ -179,6 +190,7 @@ async def main(
             question_row,
             results_queue,
             retrieval_config,
+            shared_retriever,
         )
         for _, question_row in df_questions.iterrows()
     ]

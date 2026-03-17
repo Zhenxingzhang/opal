@@ -89,6 +89,7 @@ class SemanticRetrievalConfig:
     reranker_model_name: str | None = None
     chunk_size: int = 1024
     chunk_overlap: int = 30
+    use_all_docs: bool = False
 
 
 @dataclass
